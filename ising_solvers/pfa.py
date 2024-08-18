@@ -1,5 +1,5 @@
 import numpy as np
-from .utils import validate_hamiltonian, pack_fields
+from .utils import validate_hamiltonian, pack_fields, get_energy
 
 
 def run(
@@ -14,9 +14,9 @@ def run(
     using PFA - a Pretty Fast implementation of the simulated Annealing
     algorithm.
 
-    The cost function being optimized is the following:
+    The cost function being optimized is:
 
-    energy = 0.5 * config @ (couplings @ config) + np.dot(fields, config)
+    energy = get_energy(couplings, fields)
 
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
@@ -47,7 +47,7 @@ def run(
     config = 2 * rng.integers(0, 2, n) - 1
 
     # energy that we are optimizing
-    energy = 0.5 * config @ (couplings @ config)
+    energy = get_energy(config, couplings)
 
     # changes in energy if each respective spin is flipped
     delta_energies = -2 * config * (couplings @ config)

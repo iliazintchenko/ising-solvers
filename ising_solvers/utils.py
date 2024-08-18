@@ -1,7 +1,46 @@
 import numpy as np
 
 
-def pack_fields(couplings: np.ndarray, fields: np.ndarray = None) -> np.ndarray:
+def get_energy(
+    spins: np.ndarray,
+    couplings: np.ndarray,
+    fields: np.ndarray | None = None,
+    offset: float | None = None,
+) -> float:
+    """
+    Compute the energy of the system with either binary spins (0, 1) or Ising
+    spins (-1, 1).
+
+    energy = 0.5 * spins @ (couplings @ spins) + np.dot(fields, spins) + offset
+
+    Parameters
+    ----------
+    couplings : np.ndarray
+        A square matrix (n x n) representing the interaction strengths between the binary spins.
+    fields : np.ndarray, optional
+        A vector of length n representing the external fields acting on each binary spin.
+        If not provided, defaults to a zero vector.
+    offset: float, optional
+        Constant energy offset term. If not provided, defaults to 0.
+
+    Returns
+    -------
+    float
+        The energy of the system.
+    """
+
+    energy = 0.5 * spins @ (couplings @ spins)
+
+    if fields is not None:
+        energy += np.dot(fields, spins)
+
+    if offset is not None:
+        energy += offset
+
+    return energy
+
+
+def pack_fields(couplings: np.ndarray, fields: np.ndarray | None = None) -> np.ndarray:
     """
     Packs transverse fields into an additional dummy spin that is coupled to all other spins.
 
@@ -55,8 +94,8 @@ def validate_hamiltonian(
 def binary_to_ising(
     couplings: np.ndarray,
     fields: np.ndarray | None = None,
-    constant: float | None = None,
-) -> (np.ndarray, np.ndarray, float):
+    offset: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, float]:
     """
     Maps the Hamiltonian of a system with binary spins (0, 1) to an equivalent Hamiltonian
     of a system with Ising spins (-1, +1).
@@ -68,7 +107,7 @@ def binary_to_ising(
     fields : np.ndarray, optional
         A vector of length n representing the external fields acting on each binary spin.
         If not provided, it defaults to a zero vector.
-    constant : float, optional
+    offset: float, optional
         Constant energy offset term. If not provided, defaults to 0.
 
     Returns
@@ -78,7 +117,7 @@ def binary_to_ising(
     np.ndarray
         The transformed field vector for the Ising spins.
     float
-        The shifted constant term.
+        The shifted offset term.
     """
 
     validate_hamiltonian(couplings, fields)
@@ -92,10 +131,10 @@ def binary_to_ising(
     else:
         fields = fields.copy()
 
-    # shift the constant term
-    if constant is None:
-        constant = 0.0
-    constant += np.sum(fields) / 2 + np.sum(couplings) / 8
+    # shift the offset term
+    if offset is None:
+        offset = 0.0
+    offset += np.sum(fields) / 2 + np.sum(couplings) / 8
 
     # map the fields
     fields = fields / 2 + np.sum(couplings, axis=1) / 4
@@ -103,4 +142,4 @@ def binary_to_ising(
     # map the couplings
     couplings /= 4
 
-    return couplings, fields, constant
+    return couplings, fields, offset
