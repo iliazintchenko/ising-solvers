@@ -11,7 +11,6 @@ def pack_fields(couplings: np.ndarray, fields: np.ndarray = None) -> np.ndarray:
         A square matrix (n x n) representing the interaction strengths between the binary spins.
     fields : np.ndarray, optional
         A vector of length n representing the external fields acting on each binary spin.
-
     """
 
     couplings = couplings.copy()
@@ -54,8 +53,10 @@ def validate_hamiltonian(
 
 
 def binary_to_ising(
-    couplings: np.ndarray, fields: np.ndarray | None = None
-) -> (np.ndarray, np.ndarray):
+    couplings: np.ndarray,
+    fields: np.ndarray | None = None,
+    constant: float | None = None,
+) -> (np.ndarray, np.ndarray, float):
     """
     Maps the Hamiltonian of a system with binary spins (0, 1) to an equivalent Hamiltonian
     of a system with Ising spins (-1, +1).
@@ -67,6 +68,8 @@ def binary_to_ising(
     fields : np.ndarray, optional
         A vector of length n representing the external fields acting on each binary spin.
         If not provided, it defaults to a zero vector.
+    constant : float, optional
+        Constant energy offset term. If not provided, defaults to 0.
 
     Returns
     -------
@@ -74,6 +77,8 @@ def binary_to_ising(
         The transformed coupling matrix for the Ising spins.
     np.ndarray
         The transformed field vector for the Ising spins.
+    float
+        The shifted constant term.
     """
 
     validate_hamiltonian(couplings, fields)
@@ -87,10 +92,15 @@ def binary_to_ising(
     else:
         fields = fields.copy()
 
+    # shift the constant term
+    if constant is None:
+        constant = 0.0
+    constant += np.sum(fields) / 2 + np.sum(couplings) / 8
+
     # map the fields
     fields = fields / 2 + np.sum(couplings, axis=1) / 4
 
     # map the couplings
     couplings /= 4
 
-    return couplings, fields
+    return couplings, fields, constant
