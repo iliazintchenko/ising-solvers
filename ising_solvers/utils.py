@@ -1,7 +1,32 @@
 import numpy as np
 
 
-def validate_hamiltonian(couplings: np.ndarray, fields: np.ndarray = None) -> None:
+def pack_fields(couplings: np.ndarray, fields: np.ndarray = None) -> np.ndarray:
+    """
+    Packs transverse fields into an additional dummy spin that is coupled to all other spins.
+
+    Parameters
+    ----------
+    couplings : np.ndarray
+        A square matrix (n x n) representing the interaction strengths between the binary spins.
+    fields : np.ndarray, optional
+        A vector of length n representing the external fields acting on each binary spin.
+
+    """
+
+    couplings = couplings.copy()
+
+    # if we have fields, pack them into the couplings via an additional dummy spin
+    if fields is not None:
+        couplings = np.vstack((couplings, fields))
+        couplings = np.hstack((couplings, np.append(fields, 0.0).reshape(-1, 1)))
+
+    return couplings
+
+
+def validate_hamiltonian(
+    couplings: np.ndarray, fields: np.ndarray | None = None
+) -> None:
     """
     Validates the couplings matrix and fields vector for consistency.
 
