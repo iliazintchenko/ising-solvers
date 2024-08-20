@@ -63,17 +63,23 @@ def run(
     # rotate noise vector around cyclically to avoid biasing any single spin
     noise_arr = [np.roll(noise_vec, i) for i in range(n)]
 
+    # pre-multiplying couplings by 4 to speed up delta_energies update
+    couplings *= 4
+
     # anneal from beta == 0 to beta = beta_max with num_flips spin flips
     for k, beta in enumerate(np.linspace(0.0, beta_max, num_flips)):
 
-        # sample the spin to flip according to P[i] = exp(-beta*dE[i]) using our noise vector
+        # sample the spin to flip according to probabilities np.exp(-beta * delta_energies) using our noise vector
         i = (-beta * delta_energies + noise_arr[k % n]).argmax()
 
         # update total energy
         energy += delta_energies[i]
 
         # update delta_energies
-        delta_energies += (4 * spins[i]) * couplings[i] * spins
+        if spins[i] == 1:
+            delta_energies += couplings[i] * spins
+        else:
+            delta_energies -= couplings[i] * spins
         delta_energies[i] -= 2 * delta_energies[i]
 
         # actually flip the spin
@@ -84,7 +90,7 @@ def run(
             energy_min = energy
             spins_min = spins.copy()
 
-    # if we had any fields cut away the last dummy spin
+    # if we had any fields, cut away the last dummy spin
     if fields is not None:
         spins_min = spins_min[-1] * spins_min[:-1]
 
