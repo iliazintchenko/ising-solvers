@@ -73,9 +73,8 @@ def run(
         energy += delta_energies[i]
 
         # update delta_energies
-        delta_delta_energies = (4 * spins[i]) * couplings[i] * spins
-        delta_delta_energies[i] = -2 * delta_energies[i]
-        delta_energies += delta_delta_energies
+        delta_energies += (4 * spins[i]) * couplings[i] * spins
+        delta_energies[i] -= 2 * delta_energies[i]
 
         # actually flip the spin
         spins[i] *= -1
