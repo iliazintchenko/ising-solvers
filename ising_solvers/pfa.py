@@ -29,6 +29,7 @@ def run(
         np.ndarray: The configuration of spins that minimizes the energy.
     """
 
+    # make some basic validation checks
     validate_hamiltonian(couplings, fields)
 
     if beta_max <= 0.0:
@@ -80,7 +81,7 @@ def run(
             delta_energies += couplings[i] * spins
         else:
             delta_energies -= couplings[i] * spins
-        delta_energies[i] -= 2 * delta_energies[i]
+        delta_energies[i] *= -1
 
         # actually flip the spin
         spins[i] *= -1

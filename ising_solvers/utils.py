@@ -82,13 +82,13 @@ def validate_hamiltonian(
     """
 
     if couplings.shape[0] != couplings.shape[1]:
-        raise ValueError("Couplings matrix must be square")
+        raise ValueError("Couplings must be square matrix")
     if fields is not None and len(fields) != len(couplings):
         raise ValueError("Fields must have the same length as couplings matrix")
     if not np.allclose(np.diag(couplings), 0.0):
         raise ValueError("Couplings diagonal must be zero")
     if not np.array_equal(couplings, couplings.T):
-        raise ValueError("Couplings must be symmetric")
+        raise ValueError("Couplings must be symmetric matrix")
 
 
 def binary_to_ising(
