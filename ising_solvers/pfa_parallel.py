@@ -26,8 +26,9 @@ def run(
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
         fields (np.ndarray, optional): External field terms. Defaults to None.
-        beta_max (float): The maximum inverse temperature. Defaults to 1.0.
-        num_flips (int): The number of spin flips to perform. Defaults to 1000.
+        beta_max (float): Maximum inverse temperature. Defaults to 1.0.
+        num_flips (int): Number of spin flips to perform. Defaults to 1000.
+        num_reps (int): Number of repetitions to perform, each starting from a different random configuration. Defaults to 1.
         seed (int): Seed for the random number generator.
         device (str): 'cuda' for GPU, 'cpu' for CPU.
 
