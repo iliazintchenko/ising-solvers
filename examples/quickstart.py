@@ -1,5 +1,5 @@
 import numpy as np
-from ising_solvers import pfa, pfa_parallel, utils
+from ising_solvers import pfa_cpu, pfa_gpu, utils
 
 couplings = np.array(
     [
@@ -28,17 +28,21 @@ beta_max = 3.0
 num_flips = 1000
 num_reps = 100
 
-spins_min = pfa.run(couplings, fields, beta_max=beta_max, num_flips=num_flips, seed=42)
+spins_min = pfa_cpu.run(
+    couplings,
+    fields,
+    beta_max,
+    num_flips,
+)
 energy_min = utils.get_energy(spins_min, couplings, fields, offset)
 print("Ground state:", spins_min, energy_min)
 
-spins_min = pfa_parallel.run(
+spins_min = pfa_gpu.run(
     couplings,
     fields,
-    beta_max=beta_max,
-    num_flips=num_flips,
-    num_reps=num_reps,
-    seed=42,
+    beta_max,
+    num_flips,
+    num_reps,
 )
 energy_min = utils.get_energy(spins_min, couplings, fields, offset)
-print("Ground state parallel:", spins_min, energy_min)
+print("Ground state GPU:", spins_min, energy_min)

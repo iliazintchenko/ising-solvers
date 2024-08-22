@@ -17,7 +17,6 @@ def run(
     num_flips: int = 1000,
     num_reps: int = 1,
     seed: int = 42,
-    device: str = "cuda" if torch.cuda.is_available() else "cpu",
 ) -> np.ndarray:
     """
     Attempts to find the ground state configuration of an Ising spin glass
@@ -30,11 +29,15 @@ def run(
         num_flips (int): Number of spin flips to perform. Defaults to 1000.
         num_reps (int): Number of repetitions to perform, each starting from a different random configuration. Defaults to 1.
         seed (int): Seed for the random number generator.
-        device (str): 'cuda' for GPU, 'cpu' for CPU.
 
     Returns:
         np.ndarray: The configuration of spins that minimizes the energy.
     """
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("GPU not available. This implementation requires a GPU.")
+
+    device = "cuda"
 
     validate_hamiltonian(couplings, fields)
 
