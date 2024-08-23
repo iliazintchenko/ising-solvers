@@ -1,5 +1,5 @@
 import numpy as np
-from ising_solvers import pfa_cpu, pfa_gpu, utils
+from ising_solvers import utils
 
 couplings = np.array(
     [
@@ -28,6 +28,8 @@ beta_max = 3.0
 num_flips = 1000
 num_reps = 100
 
+from ising_solvers import pfa_cpu
+
 spins_min = pfa_cpu.run(
     couplings,
     fields,
@@ -38,12 +40,32 @@ spins_min = pfa_cpu.run(
 energy_min = utils.get_energy(spins_min, couplings, fields, offset)
 print("Ground state CPU:", spins_min, energy_min)
 
-spins_min = pfa_gpu.run(
-    couplings,
-    fields,
-    beta_max,
-    num_flips,
-    num_reps,
-)
-energy_min = utils.get_energy(spins_min, couplings, fields, offset)
-print("Ground state GPU:", spins_min, energy_min)
+try:
+    from ising_solvers import pfa_gpu
+
+    spins_min = pfa_gpu.run(
+        couplings,
+        fields,
+        beta_max,
+        num_flips,
+        num_reps,
+    )
+    energy_min = utils.get_energy(spins_min, couplings, fields, offset)
+    print("Ground state GPU:", spins_min, energy_min)
+except Exception as e:
+    print("Failed running on GPU:", e)
+
+try:
+    from ising_solvers import pfa_tpu
+
+    spins_min = pfa_tpu.run(
+        couplings,
+        fields,
+        beta_max,
+        num_flips,
+        num_reps,
+    )
+    energy_min = utils.get_energy(spins_min, couplings, fields, offset)
+    print("Ground state TPU:", spins_min, energy_min)
+except Exception as e:
+    print("Failed running on TPU:", e)
