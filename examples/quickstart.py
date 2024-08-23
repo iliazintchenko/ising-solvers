@@ -33,9 +33,10 @@ spins_min = pfa_cpu.run(
     fields,
     beta_max,
     num_flips,
+    num_reps,
 )
 energy_min = utils.get_energy(spins_min, couplings, fields, offset)
-print("Ground state:", spins_min, energy_min)
+print("Ground state CPU:", spins_min, energy_min)
 
 spins_min = pfa_gpu.run(
     couplings,

@@ -20,7 +20,8 @@ def run(
 ) -> np.ndarray:
     """
     Attempts to find the ground state configuration of an Ising spin glass
-    using a GPU-accelerated implementation of the simulated annealing algorithm.
+    using a GPU-accelerated PFA - a Pretty Fast implementation of the simulated
+    Annealing algorithm.
 
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
