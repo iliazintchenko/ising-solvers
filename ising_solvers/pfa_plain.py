@@ -25,9 +25,10 @@ def run(
         beta_max (float): The maximum inverse temperature. Defaults to 1.0.
         num_flips (int): The number of spin flips to perform. Defaults to 1000.
         seed (int): Seed for the random number generator
-
     Returns:
         np.ndarray: The configuration of spins that minimizes the energy.
+    Raises:
+        ValueError: If input parameters are invalid.
     """
 
     # make some basic validation checks

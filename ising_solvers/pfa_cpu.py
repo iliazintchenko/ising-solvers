@@ -22,9 +22,10 @@ def run(
         num_flips (int): The number of spin flips to perform. Defaults to 1000.
         num_reps (int): Number of repetitions to perform, each starting from a different random configuration. Defaults to 1.
         seed (int): Seed for the random number generator
-
     Returns:
         np.ndarray: The configuration of spins that minimizes the energy.
+    Raises:
+        ValueError: If input parameters are invalid.
     """
 
     validate_hamiltonian(couplings, fields)
