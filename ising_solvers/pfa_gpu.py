@@ -52,7 +52,6 @@ def run(
         raise ValueError("num_reps must be positive")
 
     couplings = pack_fields(couplings, fields)
-
     couplings = torch.tensor(couplings, dtype=torch.float32, device=device)
 
     n = couplings.shape[0]

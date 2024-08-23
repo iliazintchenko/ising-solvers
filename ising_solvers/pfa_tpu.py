@@ -1,7 +1,7 @@
 import numpy as np
+import torch
 import torch_xla
 import torch_xla.core.xla_model as xm
-import torch_xla.core.xla_random as xla_random
 from torch_xla.amp import autocast as xla_autocast
 from .utils import validate_hamiltonian, pack_fields
 
@@ -32,7 +32,9 @@ def run(
         RuntimeError: If a TPU is not available.
         ValueError: If input parameters are invalid.
     """
-    if not torch_xla.is_available():
+
+    device = xm.xla_device()
+    if device.type != "xla":
         raise RuntimeError("TPU is not available. This implementation requires a TPU.")
 
     validate_hamiltonian(couplings, fields)
@@ -44,22 +46,28 @@ def run(
         raise ValueError("num_reps must be positive")
 
     couplings = pack_fields(couplings, fields)
-    device = xm.xla_device()
+    couplings = torch.tensor(couplings, dtype=torch.float32, device=device)
 
-    couplings = xm.send_cpu_data_to_device(couplings, device)
     n = couplings.shape[0]
 
-    xm.set_rng_state(seed)
+    torch.manual_seed(seed)
 
-    spins = (2 * xla_random.randint(xm.get_ordinal(), (n, num_reps), 0, 2) - 1).float()
+    spins = (2 * torch.randint(0, 2, (n, num_reps), 0, 2, device=device) - 1).float()
+
     energy_arr = 0.5 * xm.sum(spins * (couplings @ spins), dim=0)
+
     delta_energies = -2 * spins * (couplings @ spins)
+
     j = xm.argmin(energy_arr)
     energy_min = energy_arr[j].clone().detach()
     spins_min = spins[:, j].clone().detach()
-    noise = -xm.log(-xm.log(xla_random.uniform(xm.get_ordinal(), (n, num_reps))))
+
+    noise = -torch.log(-torch.log(torch.rand((n, num_reps), device=device)))
+
     couplings.mul_(4)
+
     all_reps = xm.arange(num_reps, device=device)
+
     with xla_autocast(), xm.compile({xm.XLA_DOWNCAST_BF16: True}):
         for beta in xm.linspace(0.0, beta_max, num_flips, device=device):
             inds = (-beta * delta_energies + noise).argmax(dim=0)
