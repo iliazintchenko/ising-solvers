@@ -82,10 +82,13 @@ def run(
         energy += delta_energies[i]
 
         # update helper vector
-        helper_vec += couplings[i] * spins[i]
+        if spins[i] == 1:
+            helper_vec += couplings[i]
+        else:
+            helper_vec -= couplings[i]
 
         # flip the spin
-        spins[i] *= -1
+        spins[i] = -spins[i]
 
         # track the lowest energy state
         if energy < energy_min - 1e-06:
