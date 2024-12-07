@@ -52,8 +52,11 @@ def run(
     # energy that we are optimizing
     energy = get_energy(spins, couplings)
 
+    # helper vector
+    helper_vec = -2 * couplings @ spins
+
     # changes in energy if each respective spin is flipped
-    delta_energies = -2 * spins * (couplings @ spins)
+    delta_energies = spins * helper_vec
 
     # track the lowest energy state we have achieved
     energy_min = energy
@@ -66,7 +69,7 @@ def run(
     # rotate noise vector around cyclically to avoid biasing any single spin
     noise_arr = [np.roll(noise_vec, i) for i in range(n)]
 
-    # pre-multiplying couplings by 4 to speed up delta_energies update
+    # pre-multiplying couplings by 4 to speed up helper vector update
     couplings *= 4
 
     # anneal from beta == 0 to beta = beta_max with num_flips spin flips
@@ -78,15 +81,14 @@ def run(
         # update total energy
         energy += delta_energies[i]
 
-        # update delta_energies
-        if spins[i] == 1:
-            delta_energies += couplings[i] * spins
-        else:
-            delta_energies -= couplings[i] * spins
-        delta_energies[i] *= -1
+        # update helper vector
+        helper_vec += couplings[i] * spins[i]
 
-        # actually flip the spin
+        # flip the spin
         spins[i] *= -1
+
+        # update delta_energies
+        delta_energies = spins * helper_vec
 
         # track the lowest energy state
         if energy < energy_min - 1e-06:
