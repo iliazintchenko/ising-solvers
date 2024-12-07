@@ -55,9 +55,6 @@ def run(
     # helper vector
     helper_vec = -2 * couplings @ spins
 
-    # changes in energy if each respective spin is flipped
-    delta_energies = spins * helper_vec
-
     # track the lowest energy state we have achieved
     energy_min = energy
     spins_min = spins.copy()
@@ -75,6 +72,9 @@ def run(
     # anneal from beta == 0 to beta = beta_max with num_flips spin flips
     for k, beta in enumerate(np.linspace(0.0, beta_max, num_flips)):
 
+        # changes in energy if each respective spin is flipped
+        delta_energies = spins * helper_vec
+
         # sample the spin to flip according to probabilities np.exp(-beta * delta_energies) using our noise vector
         i = (-beta * delta_energies + noise_arr[k % n]).argmax()
 
@@ -86,9 +86,6 @@ def run(
 
         # flip the spin
         spins[i] *= -1
-
-        # update delta_energies
-        delta_energies = spins * helper_vec
 
         # track the lowest energy state
         if energy < energy_min - 1e-06:
