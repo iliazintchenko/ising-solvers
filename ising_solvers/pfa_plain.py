@@ -93,7 +93,7 @@ def run(
         # track the lowest energy state
         if energy < energy_min - 1e-06:
             energy_min = energy
-            spins_min = spins.copy()
+            spins_min[:] = spins
 
     # if we had any fields, fold the last dummy spin back in
     if fields is not None:
