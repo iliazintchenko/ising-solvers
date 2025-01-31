@@ -64,7 +64,7 @@ def run(
     noise_vec = -np.log(-np.log(rng.random(n)))
 
     # rotate noise vector around cyclically to avoid biasing any single spin
-    noise_arr = [np.roll(noise_vec, i) for i in range(n)]
+    noise_arr = np.array([np.roll(noise_vec, i) for i in range(n)])
 
     # pre-multiplying couplings by 4 to speed up helper vector update
     couplings *= 4
