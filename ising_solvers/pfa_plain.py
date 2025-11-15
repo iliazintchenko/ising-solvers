@@ -36,8 +36,8 @@ def run(
 
     if beta_max <= 0.0:
         raise ValueError("beta_max must be positive")
-    if num_flips <= 0:
-        raise ValueError("num_flips must be positive")
+    if num_flips <= 1:
+        raise ValueError("num_flips must be at least 2")
 
     # fuse fields into the couplings via an additional dummy spin to make things simpler
     couplings = pack_fields(couplings, fields)
@@ -52,9 +52,6 @@ def run(
     # energy that we are optimizing
     energy = get_energy(spins, couplings)
 
-    # helper vector
-    helper_vec = -2 * couplings @ spins
-
     # track the lowest energy state we have achieved
     energy_min = energy
     spins_min = spins.copy()
@@ -62,30 +59,39 @@ def run(
     # prepare noise vector to use the Gumbel-Max trick for sampling:
     # https://lips.cs.princeton.edu/the-gumbel-max-trick-for-discrete-distributions/
     noise_vec = -np.log(-np.log(rng.random(n)))
+    noise_buffer = np.concatenate((noise_vec, noise_vec))
+    noise_shift = 0
 
-    # rotate noise vector around cyclically to avoid biasing any single spin
-    noise_arr = np.array([np.roll(noise_vec, i) for i in range(n)])
+    # changes in energies if each respective spin is flipped
+    delta_energies = -2 * spins * (couplings @ spins)
 
     # pre-multiplying couplings by 4 to speed up helper vector update
     couplings *= 4
 
+    # scratch space reused throughout the loop to avoid repeated allocations
+    work = np.empty_like(delta_energies)
+
+    beta_step = beta_max / (num_flips - 1)
+    beta = 0.0
+
     # anneal from beta == 0 to beta = beta_max with num_flips spin flips
-    for k, beta in enumerate(np.linspace(0.0, beta_max, num_flips)):
+    for _ in range(num_flips):
 
-        # changes in delta energies if each respective spin is flipped
-        delta_energies = spins * helper_vec
+        start = n - noise_shift
+        noise_view = noise_buffer[start : start + n]
 
-        # sample the spin to flip with probabilities np.exp(-beta * delta_energies)
-        i = (-beta * delta_energies + noise_arr[k % n]).argmax()
-
-        # update helper vector
-        if spins[i] == 1:
-            helper_vec += couplings[i]
-        else:
-            helper_vec -= couplings[i]
+        np.multiply(delta_energies, -beta, out=work)
+        work += noise_view
+        i = int(work.argmax())
 
         # update total energy
         energy += delta_energies[i]
+
+        # update delta energies using the shared scratch buffer
+        np.multiply(couplings[i], spins, out=work)
+        np.multiply(work, spins[i], out=work)
+        delta_energies += work
+        delta_energies[i] *= -1
 
         # flip the spin
         spins[i] = -spins[i]
@@ -93,7 +99,12 @@ def run(
         # track the lowest energy state
         if energy < energy_min - 1e-06:
             energy_min = energy
-            spins_min[:] = spins
+            np.copyto(spins_min, spins)
+
+        noise_shift += 1
+        if noise_shift == n:
+            noise_shift = 0
+        beta += beta_step
 
     # if we had any fields, fold the last dummy spin back in
     if fields is not None:
