@@ -1,12 +1,17 @@
 import numpy as np
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from ising_solvers import utils
 
 couplings = np.array(
     [
-        [0.0, -1.1, 0.2, 0.15],
+        [0.0, -1.1, 0.2, 0.15234],
         [-1.1, 0.0, -1.5, 0.8],
         [0.2, -1.5, 0.0, -1.0],
-        [0.15, 0.8, -1.0, 0.0],
+        [0.15234, 0.8, -1.0, 0.0],
     ]
 )
 fields = np.array([0.1, -0.2, 0.3, -0.1])
