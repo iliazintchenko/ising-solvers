@@ -41,13 +41,14 @@ def run(
 
     # fuse fields into the couplings via an additional dummy spin to make things simpler
     couplings = pack_fields(couplings, fields)
+    couplings = np.ascontiguousarray(couplings)
 
     n = len(couplings)
 
     rng = np.random.default_rng(seed)
 
     # start with random spins
-    spins = 2 * rng.integers(0, 2, n) - 1
+    spins = 2.0 * rng.integers(0, 2, n).astype(np.float64) - 1.0
 
     # energy that we are optimizing
     energy = get_energy(spins, couplings)
@@ -71,25 +72,31 @@ def run(
     # scratch space reused throughout the loop to avoid repeated allocations
     work = np.empty_like(delta_energies)
 
-    beta_schedule = np.linspace(0.0, beta_max, num_flips)
+    beta_step = beta_max / (num_flips - 1)
+    beta = 0.0
+
+    #caching ufunc objects to avoid repeated lookups
+    multiply = np.multiply
+    add = np.add
+    argmax = np.argmax
 
     # anneal 
-    for beta in beta_schedule:
+    for _ in range(num_flips):
 
         start = n - noise_shift
         noise_view = noise_buffer[start : start + n]
 
-        np.multiply(delta_energies, -beta, out=work)
-        work += noise_view
-        i = int(work.argmax())
+        multiply(delta_energies, -beta, out=work)
+        add(work, noise_view, out=work)
+        i = int(argmax(work))
 
         # update total energy
         energy += delta_energies[i]
 
         # update delta energies using the shared scratch buffer
-        np.multiply(couplings[i], spins, out=work)
-        np.multiply(work, spins[i], out=work)
-        delta_energies += work
+        multiply(couplings[i], spins, out=work)
+        multiply(work, spins[i], out=work)
+        add(delta_energies, work, out=delta_energies)
         delta_energies[i] *= -1
 
         # flip the spin
@@ -104,8 +111,11 @@ def run(
         if noise_shift == n:
             noise_shift = 0
 
+        beta += beta_step
+
     # if we had any fields, fold the last dummy spin back in
     if fields is not None:
         spins_min = spins_min[-1] * spins_min[:-1]
 
+    spins_min = spins_min.astype(np.int8, copy=False)
     return spins_min
