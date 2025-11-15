@@ -71,11 +71,10 @@ def run(
     # scratch space reused throughout the loop to avoid repeated allocations
     work = np.empty_like(delta_energies)
 
-    beta_step = beta_max / (num_flips - 1)
-    beta = 0.0
+    beta_schedule = np.linspace(0.0, beta_max, num_flips)
 
-    # anneal from beta == 0 to beta = beta_max with num_flips spin flips
-    for _ in range(num_flips):
+    # anneal 
+    for beta in beta_schedule:
 
         start = n - noise_shift
         noise_view = noise_buffer[start : start + n]
@@ -104,7 +103,6 @@ def run(
         noise_shift += 1
         if noise_shift == n:
             noise_shift = 0
-        beta += beta_step
 
     # if we had any fields, fold the last dummy spin back in
     if fields is not None:
