@@ -15,15 +15,16 @@ Build it once with a C compiler:
 make
 ```
 
-This compiles `ising_solvers/native/pfa_native.c` for the current machine. The SIMD path follows from the target:
+This compiles `ising_solvers/native/pfa_native.c` for the current machine. That file holds the anneal loop and
+includes the one SIMD path that matches the target, each in its own file:
 
-| path | used on |
-|---|---|
-| SVE | ARM with SVE (Graviton3, A64FX, ...) |
-| NEON | every other 64-bit ARM (Apple Silicon, Graviton4, ...) |
-| AVX-512 | x86-64 with AVX-512 |
-| AVX2 | x86-64 with AVX2 |
-| scalar | anything else |
+| path | file | used on |
+|---|---|---|
+| SVE | `pfa_native_sve.c` | ARM with SVE (Graviton3, A64FX, ...) |
+| NEON | `pfa_native_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton4, ...) |
+| AVX-512 | `pfa_native_avx512.c` | x86-64 with AVX-512 |
+| AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
+| scalar | `pfa_native_scalar.c` | anything else |
 
 `pfa_native.simd_path()` reports which one was built. To build for a different target, override the
 architecture flags, e.g. `make ARCH_FLAGS=-mavx2`.

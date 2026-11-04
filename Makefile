@@ -13,8 +13,9 @@ endif
 SRC := ising_solvers/native/pfa_native.c
 LIB := ising_solvers/native/libpfa_native.so
 
-$(LIB): $(SRC)
-	$(CC) -O3 -ffp-contract=off -fPIC -shared $(ARCH_FLAGS) -o $@ $<
+# pfa_native.c includes the one pfa_native_<path>.c that matches the target
+$(LIB): $(SRC) $(wildcard ising_solvers/native/pfa_native_*.c)
+	$(CC) -O3 -ffp-contract=off -fPIC -shared $(ARCH_FLAGS) -o $@ $(SRC)
 
 .PHONY: clean
 clean:
