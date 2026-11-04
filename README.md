@@ -8,7 +8,7 @@ E(s) = ½ sᵀ J s + hᵀ s
 
 for a symmetric coupling matrix J (zero diagonal) and fields h.
 
-Every solver here runs the same annealer. It flips one spin at a time while the
+Every implementation in this project runs the same annealer (lets call it PFA). It flips one spin at a time while the
 inverse temperature β rises linearly from 0 to `beta_max`. What differs from simulated annealing in how it chooses the spin.
 
 Classic simulated annealing proposes a random spin and accepts the flip with probability min(1, e^(−β ΔE)), where
@@ -70,10 +70,3 @@ includes the one SIMD path that matches the target, each in its own file:
 
 `pfa_native.simd_path()` reports which one was built. To build for a different target, override the
 architecture flags, e.g. `make ARCH_FLAGS=-mavx2`.
-
-Speed on one core of an Apple M4 Max (NEON), random fully connected problem with fields:
-
-| spins | `pfa_plain` | `pfa_native` |
-|---|---|---|
-| 1000 | 0.30M flips/s | 4.8M flips/s |
-| 4000 | 0.064M flips/s | 0.88M flips/s |
