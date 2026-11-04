@@ -39,8 +39,6 @@ touch all n spins anyway to update them, and the selection rides along in the sa
 | `pfa_tpu` | PyTorch/XLA on a TPU |
 | `pfa_native` | compiled C with SIMD, one core |
 
-## Native single-core engine (`pfa_native`)
-
 `pfa_native` is built for one kind of problem: dense (all-to-all) spin glasses with fields and floating-point
 couplings. Each flip reads a full row of float64 couplings, so on sparse problems it pays for every zero, and
 integer or low-precision couplings gain nothing from their structure.
@@ -51,13 +49,7 @@ only when two scores agree to about 7 digits; in testing that happened about onc
 `num_reps=1`, `pfa_native` draws the same random numbers as `pfa_plain`, so the two follow the same trajectory
 until such a step, and statistically equivalent ones after it.
 
-Build it once with a C compiler:
-
-```
-make
-```
-
-This compiles `ising_solvers/native/pfa_native.c` for the current machine. That file holds the anneal loop and
+Build it once with a C compiler using `make`. This compiles `ising_solvers/native/pfa_native.c` for the current machine. That file holds the anneal loop and
 includes the one SIMD path that matches the target, each in its own file:
 
 | path | file | used on |
