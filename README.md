@@ -3,6 +3,10 @@ Pretty fast solvers for Ising spin glasses
 
 ## Native single-core engine (`pfa_native`)
 
+`pfa_native` is optimized specifically, and only, for dense (all-to-all) spin glasses with fields and
+floating-point couplings. Every flip streams a full row of float64 couplings, so sparse problems pay for all the
+zeros, and integer or low-precision couplings get no benefit from their structure.
+
 The same algorithm as `pfa_plain`, compiled to SIMD code. Each flip updates the delta energies and selects the
 next spin in a single pass over memory. With `num_reps=1` it draws the same random numbers as `pfa_plain`, and
 delta energies and energies are float64 as in `pfa_plain`. Only the selection scores are compared in float32, so a
