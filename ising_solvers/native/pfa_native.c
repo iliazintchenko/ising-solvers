@@ -6,8 +6,8 @@
 //
 // This file holds the anneal loop and picks the SIMD path at compile time from the target flags (see the
 // Makefile). Each path lives in its own file and defines one function, flip_pass(), which does the pass:
-//   pfa_native_sve.c     vector-length agnostic, predicated   ARM with SVE (Graviton3, A64FX, ...)
-//   pfa_native_neon.c    2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton4, ...)
+//   pfa_native_sve.c     vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
+//   pfa_native_neon.c    2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton2, ...)
 //   pfa_native_avx512.c  8 doubles per vector                 x86-64 with AVX-512
 //   pfa_native_avx2.c    4 doubles per vector                 x86-64 with AVX2
 //   pfa_native_scalar.c                                       anything else
