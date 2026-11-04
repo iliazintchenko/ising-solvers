@@ -45,11 +45,9 @@ integer or low-precision couplings gain nothing from their structure.
 
 It runs the same algorithm as `pfa_plain`, with each flip's update and selection fused into one pass over memory:
 
-- Each spin keeps half its local field, (h + J s) / 2, in float64. Flipping spin i subtracts s_i times row i of
-  the couplings, which are read in place from the caller's array without a copy.
-- Fields enter only through the initial local fields, so no dummy spin is needed.
-- The noise is read from a random offset at every step rather than shifted by one position, so results do not
-  depend on the order of the spins.
+- Each spin keeps its local field h + J s in float64, and flipping spin i adds −2 s_i times row i of the couplings.
+  The coupling matrix is read in place, without a copy.
+- Each step reads the noise vector at a random offset, so results do not depend on how the spins are ordered.
 - Selection scores are compared in float32, which can change a pick only when two scores agree to about 7 digits.
 
 Build it once with a C compiler using `make`. This compiles `ising_solvers/native/pfa_native.c` for the current machine. That file holds the anneal loop and
