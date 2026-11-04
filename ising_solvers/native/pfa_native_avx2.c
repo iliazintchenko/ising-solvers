@@ -1,36 +1,46 @@
-// AVX2 pass (included by pfa_native.c). Chunks of 64 spins; a group of 16 spins = 4 float64 vectors of delta
-// energies -> 2 float32 score vectors of 8. Updates dE with row Ji of the flipped spin (sign si) and returns the
-// next spin, the first to reach max_j(nb * dE_j + nz_j).
+// AVX2 pass (included by pfa_native.c). Chunks of 64 spins; a group of 16 spins = 4 float64 vectors of local
+// fields -> 2 float32 score vectors of 8. Subtracts si * Ji from phi and returns the next spin, the first to reach
+// max_j(s_j phi_j + nz_j * inv). Uses fused multiply-adds when built with FMA (any AVX2 CPU has it).
+#if defined(__FMA__)
+#define FMA8(A, B, C) _mm256_fmadd_ps(A, B, C)
+#define FMA4(A, B, C) _mm_fmadd_ps(A, B, C)
+#else
+#define FMA8(A, B, C) _mm256_add_ps(_mm256_mul_ps(A, B), C)
+#define FMA4(A, B, C) _mm_add_ps(_mm_mul_ps(A, B), C)
+#endif
 static inline float hmax8(__m256 x) {
     __m128 m = _mm_max_ps(_mm256_castps256_ps128(x), _mm256_extractf128_ps(x, 1));
     m = _mm_max_ps(m, _mm_movehl_ps(m, m));
     return _mm_cvtss_f32(_mm_max_ss(m, _mm_shuffle_ps(m, m, 1)));
 }
 
-static inline int flip_pass(const double *Ji, const double *s, double *dE, const float *nz, int np, double si, float nb) {
-    const __m256 vnb = _mm256_set1_ps(nb);
-    float bv = -__builtin_inff(); int bc = 0;
-#define UPD(D, OP, O) __m256d D = OP(_mm256_loadu_pd(dE + k + O), _mm256_mul_pd(_mm256_loadu_pd(Ji + k + O), _mm256_loadu_pd(s + k + O))); \
-    _mm256_storeu_pd(dE + k + O, D);
-#define SC(DA, DB, O) _mm256_add_ps(_mm256_mul_ps(vnb, \
-    _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(DA)), _mm256_cvtpd_ps(DB), 1)), _mm256_loadu_ps(nz + k + O))
+static inline int flip_pass(const double *Ji, double *phi, const float *s, const float *nz, int n, double si, float inv) {
+    const __m256 vinv = _mm256_set1_ps(inv);
+    const int nv = n & ~15;
+    float bv = -__builtin_inff(); int bc = 0, bl = -1;
+#define UPD(D, OP, O) __m256d D = OP(_mm256_loadu_pd(phi + k + O), _mm256_loadu_pd(Ji + k + O)); _mm256_storeu_pd(phi + k + O, D);
+#define CV8(DA, DB) _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(DA)), _mm256_cvtpd_ps(DB), 1)
+#define SC(DA, DB, O) FMA8(_mm256_loadu_ps(nz + k + O), vinv, _mm256_mul_ps(_mm256_loadu_ps(s + k + O), CV8(DA, DB)))
 #define PASS(OP) \
-    for (int j = 0; j < np; j += 64) { \
+    for (int j = 0; j < nv; j += 64) { \
         __m256 b0 = _mm256_set1_ps(-__builtin_inff()), b1 = b0; \
-        for (int k = j; k < j + 64 && k < np; k += 16) { \
+        for (int k = j; k < j + 64 && k < nv; k += 16) { \
             UPD(D0, OP, 0) UPD(D1, OP, 4) UPD(D2, OP, 8) UPD(D3, OP, 12) \
             b0 = _mm256_max_ps(b0, SC(D0, D1, 0)); b1 = _mm256_max_ps(b1, SC(D2, D3, 8)); \
         } \
         float v = hmax8(_mm256_max_ps(b0, b1)); \
         if (v > bv) { bv = v; bc = j; } \
     }
-    if (si < 0) { PASS(_mm256_sub_pd) } else { PASS(_mm256_add_pd) }
+    if (si > 0) { PASS(_mm256_sub_pd) } else { PASS(_mm256_add_pd) }
 #undef PASS
 #undef UPD
 #undef SC
-    const __m128 vnb4 = _mm_set1_ps(nb), vm = _mm_set1_ps(bv);
-    for (int k = bc; k < bc + 64 && k < np; k += 4) {   // first spin of the winning chunk at the maximum
-        __m128 w = _mm_add_ps(_mm_mul_ps(vnb4, _mm256_cvtpd_ps(_mm256_loadu_pd(dE + k))), _mm_loadu_ps(nz + k));
+#undef CV8
+    tail_pass(Ji, phi, s, nz, nv, n, si, inv, &bv, &bl);
+    if (bl >= 0) return bl;
+    const __m128 vinv4 = _mm_set1_ps(inv), vm = _mm_set1_ps(bv);
+    for (int k = bc; k < bc + 64 && k < nv; k += 4) {   // first spin of the winning chunk at the maximum
+        __m128 w = FMA4(_mm_loadu_ps(nz + k), vinv4, _mm_mul_ps(_mm_loadu_ps(s + k), _mm256_cvtpd_ps(_mm256_loadu_pd(phi + k))));
         int msk = _mm_movemask_ps(_mm_cmpeq_ps(w, vm));
         if (msk) return k + __builtin_ctz(msk);
     }
