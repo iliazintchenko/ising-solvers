@@ -1,6 +1,4 @@
-# ising-solvers
-
-Pretty fast solvers for Ising spin glasses: find the spins s ∈ {−1, +1}ⁿ that minimize the energy
+Pretty fast solvers for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize the energy
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
@@ -8,10 +6,8 @@ E(s) = ½ sᵀ J s + hᵀ s
 
 for a symmetric coupling matrix J (zero diagonal) and fields h.
 
-## The algorithm
-
-Every solver here runs the same annealer, PFA. Like simulated annealing, it flips one spin at a time while the
-inverse temperature β rises linearly from 0 to `beta_max`. What differs is how it chooses the spin.
+Every solver here runs the same annealer. It flips one spin at a time while the
+inverse temperature β rises linearly from 0 to `beta_max`. What differs from simulated annealing in how it chooses the spin.
 
 Classic simulated annealing proposes a random spin and accepts the flip with probability min(1, e^(−β ΔE)), where
 ΔE is the energy change of the flip. As the temperature drops, almost every proposal is rejected, so most of the
