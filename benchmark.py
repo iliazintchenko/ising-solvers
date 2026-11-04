@@ -66,6 +66,13 @@ except Exception as e:
     print("Failed running on CPU:", e)
 
 try:
+    from ising_solvers import pfa_native as solver
+
+    benchmark_solver(solver)
+except Exception as e:
+    print("Failed running native:", e)
+
+try:
     from ising_solvers import pfa_gpu as solver
 
     benchmark_solver(solver)

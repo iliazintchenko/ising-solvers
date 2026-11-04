@@ -46,6 +46,21 @@ energy_min = utils.get_energy(spins_min, couplings, fields, offset)
 print("Ground state CPU:", spins_min, energy_min)
 
 try:
+    from ising_solvers import pfa_native
+
+    spins_min = pfa_native.run(
+        couplings,
+        fields,
+        beta_max,
+        num_flips,
+        num_reps,
+    )
+    energy_min = utils.get_energy(spins_min, couplings, fields, offset)
+    print("Ground state native:", spins_min, energy_min)
+except Exception as e:
+    print("Failed running native:", e)
+
+try:
     from ising_solvers import pfa_gpu
 
     spins_min = pfa_gpu.run(
