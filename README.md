@@ -4,9 +4,10 @@ Pretty fast solvers for Ising spin glasses
 ## Native single-core engine (`pfa_native`)
 
 The same algorithm as `pfa_plain`, compiled to SIMD code. Each flip updates the delta energies and selects the
-next spin in a single pass over memory. The results are bit-identical to `pfa_plain`: with `num_reps=1`,
-`pfa_native.run(couplings, fields, beta_max, num_flips, 1, seed)` returns exactly the spins of
-`pfa_plain.run(couplings, fields, beta_max, num_flips, seed)`.
+next spin in a single pass over memory. With `num_reps=1` it draws the same random numbers as `pfa_plain`, and
+delta energies and energies are float64 as in `pfa_plain`. Only the selection scores are compared in float32, so a
+pick can differ from `pfa_plain`'s only when two scores agree to about 7 digits (in testing, about one step in
+50,000 or fewer). After such a step the two runs follow different but statistically equivalent trajectories.
 
 Build it once with a C compiler:
 
@@ -31,5 +32,5 @@ Speed on one core of an Apple M4 Max (NEON), random fully connected problem with
 
 | spins | `pfa_plain` | `pfa_native` |
 |---|---|---|
-| 1000 | 0.30M flips/s | 3.9M flips/s |
-| 4000 | 0.064M flips/s | 0.76M flips/s |
+| 1000 | 0.30M flips/s | 4.8M flips/s |
+| 4000 | 0.064M flips/s | 0.88M flips/s |
