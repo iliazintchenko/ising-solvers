@@ -31,5 +31,5 @@ Speed on one core of an Apple M4 Max (NEON), random fully connected problem with
 
 | spins | `pfa_plain` | `pfa_native` |
 |---|---|---|
-| 1000 | 0.30M flips/s | 2.8M flips/s |
-| 4000 | 0.064M flips/s | 0.59M flips/s |
+| 1000 | 0.30M flips/s | 3.9M flips/s |
+| 4000 | 0.064M flips/s | 0.76M flips/s |
