@@ -1,4 +1,6 @@
-Pretty fast solvers for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize the energy
+# Pretty Fast Annealer
+
+Fast solvers for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize the energy
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
