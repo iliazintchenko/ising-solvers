@@ -24,8 +24,7 @@ Sampling from that distribution directly would take n exponentials and a normali
 each g_j is drawn from the standard Gumbel distribution, then argmax_j(−β ΔE_j + g_j) is distributed exactly as
 above. Choosing the next spin becomes one multiply, one add and one comparison per spin. To keep the noise cheap,
 PFA draws one Gumbel vector at the start and reuses it under a cyclic shift, so each spin sees a different noise
-value at each step: a cheap stand-in for fresh noise. `pfa_native` shifts by a random offset at every step; the
-other solvers shift by one position.
+value at each step: a cheap stand-in for fresh noise.
 
 On dense problems the selection is cheap. Flipping a spin changes the ΔE of every other spin, so each flip has to
 touch all n spins anyway to update them, and the selection rides along in the same pass.
@@ -44,21 +43,14 @@ touch all n spins anyway to update them, and the selection rides along in the sa
 couplings. Each flip reads a full row of float64 couplings, so on sparse problems it pays for every zero, and
 integer or low-precision couplings gain nothing from their structure.
 
-It runs the same algorithm as `pfa_plain`, with each flip's update and selection fused into one pass over memory.
-It keeps half the local field of every spin, (h + J s) / 2, in float64: flipping spin i subtracts s_i times row i
-of the couplings, read in place from the caller's array without a copy. Fields enter only at the start, so there
-is no dummy spin. The selection scores are compared in float32, which can change a pick only when two scores agree
-to about 7 digits.
+It runs the same algorithm as `pfa_plain`, with each flip's update and selection fused into one pass over memory:
 
-Two choices differ from `pfa_plain` and were measured on dense test problems (40 seeds each):
-
-- The noise is read from a random offset at every step instead of shifted by one position. A shift by one makes
-  the large noise values travel through the spin indices, which ties results to how the spins happen to be
-  ordered: on one test problem, removing a single spin that never flips changed the result by about 4.5 standard
-  errors. With random offsets that dependence disappears. Against a shift by one, random offsets were much better
-  on that problem (about 7.7 standard errors), equal on two others and slightly worse on one (about 1.9).
-- Without the dummy spin, the move that flips all spins at once is gone. In testing it was chosen in at most
-  0.03% of steps, and removing it made no measurable difference.
+- Each spin keeps half its local field, (h + J s) / 2, in float64. Flipping spin i subtracts s_i times row i of
+  the couplings, which are read in place from the caller's array without a copy.
+- Fields enter only through the initial local fields, so no dummy spin is needed.
+- The noise is read from a random offset at every step rather than shifted by one position, so results do not
+  depend on the order of the spins.
+- Selection scores are compared in float32, which can change a pick only when two scores agree to about 7 digits.
 
 Build it once with a C compiler using `make`. This compiles `ising_solvers/native/pfa_native.c` for the current machine. That file holds the anneal loop and
 includes the one SIMD path that matches the target, each in its own file:
