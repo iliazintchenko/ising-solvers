@@ -14,6 +14,11 @@
 // through the spin indices, which ties results to how the spins happen to be ordered.
 // Selection keeps only a running maximum per chunk of 64 spins; afterwards the winning chunk is rescored
 // with the same operations to find the first spin that reaches the maximum.
+// Soft tabu: for the n/4 flips after a spin flips, its score is lowered by 3 temperatures (its rate divided by
+// e^3). It discourages the cheap flip-and-undo cycling a rejection-free chain falls into near a minimum, while an
+// undo worth many temperatures (stepping back down from an expensive climb) still wins. The penalty is applied by
+// shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = 3 / (4 beta) at the time of its flip,
+// so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
 //
 // This file holds the anneal loop and picks the SIMD path at compile time from the target flags (see the
 // Makefile). Each path lives in its own file and defines one function, flip_pass(), which does the pass:
@@ -31,6 +36,7 @@
 //   -DTEST_STREAMING_SVE  runs the SVE path in SME streaming mode (e.g. Apple M4, -mcpu=apple-m4)
 //   -DTEST_AVX512_SIMDE   runs the AVX-512 path through the SIMDe emulation headers (-I<simde include dir>)
 #include <stdint.h>
+#include <stdlib.h>
 
 #if defined(__aarch64__) || defined(__FMA__)
 #define FMAF(A, B, C) __builtin_fmaf(A, B, C)
@@ -93,22 +99,48 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 
 const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 
-// J: the n x n couplings, row-major; phi: n local fields / 2 (updated in place); s: n spins as float32 +-1
-// (updated in place); noise: the noise vector stored twice (2n floats); sbest: n floats (out).
-// seed: for the random noise offsets.
-ANNEAL_ATTR void pfa_native_anneal(const double *J, double *phi, float *s, const float *noise, int n,
-                                   long nflips, double beta_max, int bi, double *E_io, double *best_io, float *sbest,
-                                   uint64_t seed) {
+#define TABU_LAMBDA 3.0   // soft tabu penalty, in temperatures; the tabu list holds the last n/4 flips
+// pen[j]: the shift c_j currently applied to phi[j] (0 when j is not tabu); last[j]: step of j's last flip;
+// recent[t % tenure]: the spin flipped at step t.
+ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, const float *noise, int n, long nflips,
+                                    double beta_max, int bi, double *E_io, double *best_io, float *sbest, uint64_t seed,
+                                    int tenure, double *pen, long *last, int *recent) {
     double E = *E_io, best = *best_io, beta = 0.0, dbeta = beta_max / (double)(nflips - 1);
     uint64_t x = seed | 1;   // xorshift64* generator for the offsets
     for (long t = 0; t < nflips; t++) {
         int i = bi; double si = (double)s[i];
-        E -= 4.0 * si * phi[i]; s[i] = -s[i];   // E += dE_i
-        if (E < best - 1e-6) { best = E; __builtin_memcpy(sbest, s, sizeof(float) * n); }
+        double phii = phi[i] + si * pen[i];   // true local field of i
+        E -= 4.0 * si * phii;                 // E += dE_i
+        phi[i] = phii; pen[i] = 0.0; s[i] = -s[i];
         beta += dbeta;
+        if (tenure > 0) {
+            if (t >= tenure) {   // the spin flipped tenure steps ago leaves the tabu list, unless it flipped again since
+                int j = recent[t % tenure];
+                if (last[j] == t - tenure) { phi[j] += (double)s[j] * pen[j]; pen[j] = 0.0; }
+            }
+            pen[i] = TABU_LAMBDA * 0.25 / beta; phi[i] -= (double)s[i] * pen[i];
+            recent[t % tenure] = i; last[i] = t;
+        }
+        if (E < best - 1e-6) { best = E; __builtin_memcpy(sbest, s, sizeof(float) * n); }
         x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
         int offset = (int)(((x * 2685821657736338717ULL) >> 32) * (uint64_t)n >> 32);   // uniform in [0, n)
         bi = flip_pass(J + (long)i * n, phi, s, noise + offset, n, si, (float)(0.25 / beta));
     }
+    for (int j = 0; j < n; j++) phi[j] += (double)s[j] * pen[j];   // leave the true local fields
     *E_io = E; *best_io = best;
+}
+
+// J: the n x n couplings, row-major; phi: n local fields / 2 (updated in place); s: n spins as float32 +-1
+// (updated in place); noise: the noise vector stored twice (2n floats); sbest: n floats (out).
+// seed: for the random noise offsets.
+void pfa_native_anneal(const double *J, double *phi, float *s, const float *noise, int n,
+                       long nflips, double beta_max, int bi, double *E_io, double *best_io, float *sbest,
+                       uint64_t seed) {
+    int tenure = n / 4;
+    double *pen = calloc(n, sizeof(double));
+    long *last = malloc(sizeof(long) * n);
+    int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
+    for (int j = 0; j < n; j++) last[j] = -1;
+    anneal_loop(J, phi, s, noise, n, nflips, beta_max, bi, E_io, best_io, sbest, seed, tenure, pen, last, recent);
+    free(pen); free(last); free(recent);
 }

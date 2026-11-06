@@ -43,12 +43,22 @@ touch all n spins anyway to update them, and the selection rides along in the sa
 couplings. Each flip reads a full row of float64 couplings, so on sparse problems it pays for every zero, and
 integer or low-precision couplings gain nothing from their structure.
 
-It runs the same algorithm as `pfa_plain`, with each flip's update and selection fused into one pass over memory:
+It runs the algorithm of `pfa_plain` with one change to the selection, a soft tabu, and with each flip's update and
+selection fused into one pass over memory:
 
 - Each spin keeps its local field h + J s in float64, and flipping spin i adds −2 s_i times row i of the couplings.
   The coupling matrix is read in place, without a copy.
 - Each step reads the noise vector at a random offset, so results do not depend on how the spins are ordered.
 - Selection scores are compared in float32, which can change a pick only when two scores agree to about 7 digits.
+- Soft tabu: for the n/4 flips after a spin flips, its selection weight is divided by e³, as if its ΔE were higher
+  by 3 temperatures (3/β). Near a minimum, a rejection-free chain tends to flip a spin and immediately flip it
+  back, because the cheapest move after a small climb is usually to undo it. The penalty discourages that cycling
+  and pushes the search on to new states, while an undo that is worth much more than 3 temperatures, such as
+  stepping back down from an expensive climb, still happens. It costs nothing per spin: the penalty is applied as
+  a shift of the flipped spin's stored local field.
+
+The soft tabu reaches lower energies at the same number of flips, by a wide margin on dense spin glasses. Its best
+`beta_max` is about 2× higher than for the other solvers.
 
 Build it once with a C compiler using `make`. This compiles `ising_solvers/native/pfa_native.c` for the current machine. That file holds the anneal loop and
 includes the one SIMD path that matches the target, each in its own file:
