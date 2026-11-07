@@ -20,8 +20,7 @@ Each step flips one spin, chosen from all n with probability
 p_j = e^(−β ΔE_j) / Σ_k e^(−β ΔE_k)
 ```
 
-while the inverse temperature β rises linearly from 0 to `beta_max`. Downhill flips are strongly favored; uphill flips
-stay possible.
+while the inverse temperature β rises linearly from 0 to `beta_max`.
 
 **Equilibrium.** Read as a continuous-time process, each flip fires at rate e^(−β ΔE) and its reverse at
 e^(+β ΔE). The ratio e^(−2β ΔE) is detailed balance for e^(−2β E): at β, PFA equilibrates at 2β. Skipping the waiting
