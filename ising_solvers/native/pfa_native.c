@@ -14,8 +14,8 @@
 // through the spin indices, which ties results to how the spins happen to be ordered.
 // Selection keeps only a running maximum per chunk of 64 spins; afterwards the winning chunk is rescored
 // with the same operations to find the first spin that reaches the maximum.
-// Soft tabu: for the n/4 flips after a spin flips, its score is lowered by 3 temperatures (its rate divided by
-// e^3). This spreads the flips over more distinct spins, mostly while the anneal is still hot; a flip worth many
+// Soft tabu: for the n/4 flips after a spin flips, its dE is raised by 3 temperatures at the time of its flip
+// (3 / beta_i): its rate is divided by e^3 right after the flip and by more as the anneal cools. This spreads the flips over more distinct spins, mostly while the anneal is still hot; a flip worth many
 // more temperatures (such as stepping back down from an expensive climb) still wins. The penalty is applied by
 // shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = 3 / (4 beta) at the time of its flip,
 // so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
@@ -121,7 +121,7 @@ ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, cons
             pen[i] = TABU_LAMBDA * 0.25 / beta; phi[i] -= (double)s[i] * pen[i];
             recent[t % tenure] = i; last[i] = t;
         }
-        if (E < best - 1e-6) { best = E; __builtin_memcpy(sbest, s, sizeof(float) * n); }
+        if (E < best) { best = E; __builtin_memcpy(sbest, s, sizeof(float) * n); }
         x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
         int offset = (int)(((x * 2685821657736338717ULL) >> 32) * (uint64_t)n >> 32);   // uniform in [0, n)
         bi = flip_pass(J + (long)i * n, phi, s, noise + offset, n, si, (float)(0.25 / beta));

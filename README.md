@@ -42,16 +42,18 @@ reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own 
 steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, rather than a shift by one,
 keeps large noise values from marching through neighbouring indices, so results don't depend on the spin order.
 
-**Soft tabu.** For the n/4 flips after spin i flips (the tenure), its weight is divided by e^λ, with λ = 3:
+**Soft tabu.** When spin i flips, at inverse temperature β_i, its ΔE is raised by λ/β_i, λ = 3 temperatures at that
+moment, for the next n/4 flips (the tenure):
 
 ```
-p_i ∝ e^(−β ΔE_i − λ)
+p_i ∝ e^(−β (ΔE_i + λ/β_i))
 ```
 
-as if its ΔE were λ temperatures (λ/β) higher. A tabu spin i still outweighs a free spin k when
-ΔE_i < ΔE_k − λ/β, so a move worth more than λ temperatures, like stepping back down from an expensive climb, still
-happens. Among moves of similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over
-more spins; cold, it keeps the chain moving between low-energy states instead of re-flipping the same few spins.
+Right after the flip this divides its weight by e^λ; as the anneal cools, by e^(λβ/β_i). Early on, while β grows fast
+relative to β_i, the tabu is nearly hard. A tabu spin i still outweighs a free spin k when ΔE_i + λ/β_i < ΔE_k, so a
+move worth more than the penalty, like stepping back down from an expensive climb, still happens. Among moves of
+similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over more spins; cold, it
+keeps the chain moving between low-energy states instead of re-flipping the same few spins.
 
 λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled (J, h, β →
 cJ, ch, β/c) or n grows. The two values are measured, not derived, and fixed in the code. The tabu breaks detailed
@@ -84,7 +86,7 @@ coupling read, a float64 field read and written. A PFA flip also reads the spin 
 PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
 ```
 
-**Descent.** Metropolis accepts every downhill move, so it takes them in random order, whatever their size. PFA
+**Descent.** Metropolis accepts every downhill move, so it takes them in sweep order, whatever their size. PFA
 weights each by e^(β |ΔE_j|) and takes the biggest first. Each PFA flip does more of the descent, and the flips saved
 outweigh the 4/3.
 
@@ -99,8 +101,8 @@ rule on proposals that keeps the Boltzmann distribution stationary; the tabu is 
 E(s) = P · C(s) + O(s)
 ```
 
-C(s) ≥ 0 counts the violated constraints, O(s) is the objective, and P is much larger than the scale ε of changes in
-O. The hard case: every single flip from a feasible state breaks a constraint, as with one-hot or cardinality
+C(s) ≥ 0 is zero exactly on feasible states, O(s) is the objective, and P is much larger than the scale ε of changes
+in O. The hard case: every single flip from a feasible state breaks a constraint, as with one-hot or cardinality
 constraints. Then every move costs about P or more, and getting from one feasible state to another takes two flips,
 one that breaks a constraint and one that repairs it.
 
@@ -119,19 +121,20 @@ The objective alone chooses which constraint to break, whatever P is, and PFA le
 β. It can run cold enough to resolve the objective without freezing on the constraints. This advantage belongs to
 rejection-free selection as such.
 
-**Long runs.** Long anneals spend most of their time cold, where what counts is how far the chain still moves without
-climbing. At a fixed low temperature, PFA sits lower in energy than SA and still drifts further from where it started.
-(Equal temperature means PFA at β against SA at 2β.)
+**Long runs.** Late in the anneal, what counts is how far the chain still moves without climbing. At a fixed low
+temperature, PFA sits lower in energy than SA and still drifts further from where it started. (Equal temperature means
+PFA at β against SA at 2β.)
 
 **Sparse implementations.** The comparison holds on sparse problems as it stands. Written for sparsity, SA updates
 only the flipped spin's d neighbours, and that is all it needs. PFA's selection would still compare all n scores per
-step, because every new offset and every change of β moves every score. A sparse PFA needs per-spin random clocks in a
-priority queue, as in the n-fold way, at about d log n per flip. That version is not compared here.
+step, because every new offset and every change of β moves every score. A sparse PFA needs a sum tree over the rates
+(the n-fold way) or a priority queue of random clocks (the next-reaction method), at about d log n per flip with β
+held fixed between rebuilds. That version is not compared here.
 
 ## Implementation
 
 `pfa_native` runs PFA in compiled C with SIMD, on one core, on any couplings and fields. A flip changes the ΔE of
-every spin it couples to, so every flip reads one full float64 row of couplings and updates all n spins. The
+every spin it couples to, so every flip reads one full float64 row of couplings and updates all n local fields. The
 selection rides along in the same pass, for free, and a flip costs the same on every problem of a given size:
 
 - **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. Flipping spin
@@ -143,20 +146,19 @@ selection rides along in the same pass, for free, and a flip costs the same on e
   s_j φ_j + g_j / (4β)
   ```
 
-  computed in float32. Rounding can change a pick only when two scores agree to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸).
-- **Argmax without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles
-  the selection work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE)
-  reached the largest one. Afterwards it rescores that chunk, still in cache, and returns its first spin at the
-  maximum. The extra cost is one reduction per chunk plus 64 rescored spins per flip, about 64/n of a pass. The
-  rescore repeats the pass's float operations exactly (the build forbids fusing multiply-adds), so it finds the same
-  maximum, and ties go to the smallest index.
-- **Tabu for free.** The penalty, c_i = λ / (4β) in score units, is folded into the stored field,
-  φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
-  reads nothing extra. Fixed at the flip, the penalty grows as the anneal cools, to λ β/β_flip temperatures.
+computed in float32. Rounding can change a pick only when two scores agree to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸). - **Argmax
+without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles the selection
+work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE) reached the largest
+one. Afterwards it rescores that chunk, still in cache, and returns its first spin at the maximum. The extra cost is
+one reduction per chunk plus 64 rescored spins per flip, about 64/n of a pass. The rescore repeats the pass's float
+operations exactly (the build stops the compiler from fusing multiply-adds on its own), so it finds the same maximum,
+and ties go to the smallest index. - **Tabu for free.** The penalty, c_i = λ / (4β_i) in score units, is folded into
+the stored field, φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips
+again. The pass reads nothing extra.
 
 ## Usage
 
-Build with `make` and any C compiler. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
+Build with `make` and GCC or Clang. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
 which includes the one SIMD path that matches the target:
 
 | path | file | used on |
@@ -167,7 +169,8 @@ which includes the one SIMD path that matches the target:
 | AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
 | scalar | `pfa_native_scalar.c` | anything else |
 
-`pfa_native.simd_path()` reports which one was built; `make ARCH_FLAGS=-mavx2` builds for another target. Then:
+`pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another target.
+Then:
 
 ```python
 from ising_solvers import pfa_native
@@ -182,7 +185,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8).
 | `couplings` | J, an n × n symmetric matrix with zero diagonal | required | Read in place when it is a C-contiguous float64 array, otherwise copied once. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
-| `num_flips` | flips per repetition, the length of the anneal | `1000` | The whole budget: num_flips · n spin updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
+| `num_flips` | flips per repetition, the length of the anneal | `1000` | The whole budget: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | independent repetitions | `1` | Each starts from fresh random spins and noise; the best state over all of them is returned. |
 | `seed` | random seed | `42` | Sets the initial spins, the Gumbel noise vector and the per-step offsets, so runs are reproducible. |
 

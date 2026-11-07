@@ -45,11 +45,12 @@ def run(
     seed: int = 42,
 ) -> np.ndarray:
     """
-    Attempts to find the ground state of an Ising spin glass with PFA, a
+    Attempts to find the ground state of an Ising problem with PFA, a
     rejection-free annealer (see the README): every step flips one spin,
     chosen with probability proportional to exp(-beta * dE) by Gumbel-max
-    sampling, while beta rises linearly from 0 to beta_max. Spins flipped in
-    the last n/4 flips have their weight divided by e^3 (a soft tabu). Compiled
+    sampling, while beta rises linearly from 0 to beta_max. For the n/4 flips
+    after a spin flips, its dE is raised by 3 temperatures at the time of its
+    flip (a soft tabu). Compiled
     to native SIMD code on one core: each flip updates the local fields and
     selects the next spin in one pass over memory. The couplings are read in
     place, without a copy, when they are a C-contiguous float64 array.
