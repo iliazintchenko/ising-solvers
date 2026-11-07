@@ -104,7 +104,7 @@ Each ingredient of optimized SA has a counterpart in PFA:
 | optimized SA | PFA | what it does |
 |---|---|---|
 | Metropolis acceptance of one proposed spin | Boltzmann selection over all n spins | decides which flip happens |
-| sequential sweeps | soft tabu | spreads the flips over distinct spins |
+| sequential sweeps | soft tabu | spreads the work over distinct spins |
 | stored local fields | stored local fields | ΔE is read, not computed |
 | precomputed random numbers at random offsets | one Gumbel vector at random offsets | cheap randomness |
 
