@@ -14,13 +14,8 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 
 ## Algorithm
 
-PFA flips one spin per step while the inverse temperature β rises linearly from 0 to `beta_max`. It differs from
-simulated annealing in how it picks the spin.
-
-Simulated annealing proposes a random spin and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal
-cools, it rejects almost every proposal.
-
-PFA never rejects. Every step flips a spin, chosen from all n with probability
+PFA flips one spin per step while the inverse temperature β rises linearly from 0 to `beta_max`. Every step flips a
+spin, chosen from all n with probability
 
 ```
 p_j = e^(−β ΔE_j) / Σ_k e^(−β ΔE_k)
@@ -99,7 +94,8 @@ local fields, so ΔE is read rather than computed, and precomputed random number
 (lookup tables for integer couplings, multi-spin coding of 64 replicas, bipartite updates) exploit low-precision
 couplings, many replicas or sparse graphs, and are left out on both sides.
 
-Each ingredient of optimized SA has a counterpart in PFA:
+SA proposes a random spin and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it rejects
+almost every proposal. PFA never rejects. Each ingredient of optimized SA has a counterpart in PFA:
 
 | optimized SA | PFA | what it does |
 |---|---|---|
