@@ -99,6 +99,15 @@ local fields, so ΔE is read rather than computed, and precomputed random number
 (lookup tables for integer couplings, multi-spin coding of 64 replicas, bipartite updates) exploit low-precision
 couplings, many replicas or sparse graphs, and are left out on both sides.
 
+Each ingredient of optimized SA has a counterpart in PFA:
+
+| optimized SA | PFA | what it does |
+|---|---|---|
+| Metropolis acceptance of one proposed spin | Boltzmann selection over all n spins | decides which flip happens |
+| sequential sweeps | soft tabu | spreads the flips over distinct spins |
+| stored local fields | stored local fields | ΔE is read, not computed |
+| precomputed random numbers at random offsets | one Gumbel vector at random offsets | cheap randomness |
+
 **Cost per step.** A flip in either method updates all n fields. Per spin, an SA flip moves 24 bytes: a float64
 coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes each:
 32 bytes, 4/3 of an SA flip (measured: 1.2–1.4×). A rejected SA proposal reads one field and one random number, about
@@ -111,6 +120,13 @@ PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
 **Descent.** Metropolis accepts every downhill move, so it takes them in random order, whatever their size. PFA weights
 each by e^(β |ΔE_j|) and takes the biggest first. Each PFA flip does more of the descent, and the flips saved outweigh
 the 4/3.
+
+**Sweeps and the tabu.** SA that picks spins at random proposes some spins again and again while missing others:
+after n proposals, about 1/e ≈ 37% of the spins have never been tried. Sweeping in order proposes every spin once per
+n proposals, and does better. PFA has no proposals to order, since every step chooses among all n spins. The same
+repeat-avoidance takes the form of the soft tabu: a spin that just flipped is discouraged for the next n/4 flips. The
+difference is that a sweep is a hard rule on proposals, and each of its single-spin updates keeps the Boltzmann
+distribution stationary. The tabu is a soft rule on flips, and gives that up.
 
 **Constraints.** Many hard problems are an objective plus constraints written as penalties:
 
