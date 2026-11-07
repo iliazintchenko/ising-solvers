@@ -53,14 +53,12 @@ implementation: full float64 coupling rows, one replica, one core. Their tricks 
 replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
 
 SA proposes one spin at a time and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it
-rejects almost every proposal; PFA never rejects. Each ingredient of optimized SA has a counterpart in PFA:
+rejects almost every proposal; PFA never rejects. Its two ingredients have PFA counterparts:
 
-| optimized SA | PFA | what it does |
+| SA | PFA | what it does |
 |---|---|---|
 | Metropolis acceptance of one proposed spin | Boltzmann selection over all n spins | decides which flip happens |
 | sequential sweeps | tabu | spreads the work over distinct spins |
-| stored local fields | stored local fields | ΔE is read, not computed |
-| precomputed random numbers at random offsets | one Gumbel vector at random offsets | cheap randomness |
 
 **Cost per step.** A flip in either method updates all n local fields. Per spin, an SA flip moves 24 bytes: a float64
 coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes each:
