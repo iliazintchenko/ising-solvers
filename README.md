@@ -28,19 +28,6 @@ e^(+β ΔE). The ratio e^(−2β ΔE) is detailed balance for e^(−2β E): at �
 times also weights each state by its exit rate R(s) = Σ_k e^(−β ΔE_k), favoring states with many cheap exits. An
 optimizer doesn't care: it keeps the best state it has seen.
 
-**Sampling a step.** Drawing from p_j directly costs n exponentials and a normalization per step. The
-[Gumbel-max trick](https://lips.cs.princeton.edu/the-gumbel-max-trick-for-discrete-distributions/) removes both: with
-each g_j an independent standard Gumbel, g = −log(−log u) for u uniform on (0, 1),
-
-```
-P( argmax_j (−β ΔE_j + g_j) = i ) = p_i
-```
-
-so picking a spin costs one multiply, one add and one comparison per spin. The noise is drawn once: at step t, spin j
-reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own is exact Gumbel-max sampling; across
-steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, unlike a shift by one, keeps
-large values from marching through neighbouring indices, so results don't depend on the spin order.
-
 **Soft tabu.** When spin i flips at inverse temperature β_i, its ΔE is raised by λ/β_i, λ = 3 temperatures, for the
 next n/4 flips (the tenure):
 
@@ -126,9 +113,9 @@ PFA at β against SA at 2β.)
 
 **Sparse implementations.** The comparison holds on sparse problems as it stands. Written for sparsity, SA updates
 only the flipped spin's d neighbours, and that is all it needs. PFA's selection would still compare all n weights per
-step, because every new offset and every change of β moves every weight. A sparse PFA needs a sum tree over the rates
-(the n-fold way) or a priority queue of random clocks (the next-reaction method), at about d log n per flip with β
-held fixed between rebuilds. That version is not compared here.
+step, because every new noise offset and every change of β moves every weight. A sparse PFA needs a sum tree over the
+rates (the n-fold way) or a priority queue of random clocks (the next-reaction method), at about d log n per flip with
+β held fixed between rebuilds. That version is not compared here.
 
 ## Implementation
 
@@ -136,6 +123,21 @@ The annealer runs in compiled C with SIMD, on one core, on any couplings and fie
 float64 row of couplings, zeros included, and updates all n local fields; the selection rides along in the same pass.
 A flip therefore costs the same on every problem of a given size. The tricks:
 
+- **Gumbel-max sampling.** Drawing from p_j directly costs n exponentials and a normalization per step. The
+  [Gumbel-max trick](https://lips.cs.princeton.edu/the-gumbel-max-trick-for-discrete-distributions/) removes both:
+  with each g_j an independent standard Gumbel, g = −log(−log u) for u uniform on (0, 1),
+
+  ```
+  P( argmax_j (−β ΔE_j + g_j) = i ) = p_i
+  ```
+
+  so picking a spin costs one multiply, one add and one comparison per spin.
+- **Noise drawn once.** At step t, spin j reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its
+  own is exact Gumbel-max sampling; across steps the same values return permuted, a cheap stand-in for fresh noise. A
+  random offset, unlike a shift by one, keeps large values from marching through neighbouring indices, so results
+  don't depend on the spin order. The vector is stored as g followed by g, so the n values from any offset are one
+  contiguous stretch: no wraparound, no modulo. Offsets come from a xorshift64* generator, mapped to [0, n) by a
+  multiply and a shift, without division.
 - **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. After F flips,
   rounding has added at most about F · 2⁻⁵³ of the largest field: negligible.
 - **Add or subtract, chosen once.** Flipping spin i changes every φ_j by −s_i J_ij. With s_i = ±1 fixed for the pass,
@@ -148,9 +150,6 @@ A flip therefore costs the same on every problem of a given size. The tricks:
 
   computed in float32, with spins stored as float32 ±1, so no branch. Rounding can change a pick only when two scores
   agree to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸).
-- **Noise stored twice.** The Gumbel vector is stored as g followed by g, so the n values from any offset are one
-  contiguous stretch: no wraparound, no modulo. Offsets come from a xorshift64* generator, mapped to [0, n) by a
-  multiply and a shift, without division.
 - **Argmax without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles
   the selection work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE)
   reached the largest one. Afterwards it rescores that chunk, still in cache, and returns its first spin at the
