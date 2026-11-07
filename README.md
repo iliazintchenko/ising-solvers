@@ -47,29 +47,29 @@ reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own 
 steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, rather than a shift by one,
 keeps large noise values from marching through neighbouring indices, so results don't depend on the spin order.
 
+**Why it's cheap.** A flip changes the ΔE of every spin it couples to. On a dense problem that is all of them, so
+every flip already makes a pass over all n spins, and the selection rides along for free.
+
 **Soft tabu.** For n/4 flips after spin i flips, its weight is divided by e^λ, with λ = 3:
 
 ```
 p_i ∝ e^(−β ΔE_i − λ)
 ```
 
-as if its ΔE were λ temperatures (λ/β) higher. A tabu spin i still beats a free spin k when ΔE_i < ΔE_k − λ/β, so a
-move worth more than λ temperatures, like stepping back down from an expensive climb, still happens. Among moves of
-similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over more spins; cold, it keeps
-the chain moving between low-energy states instead of re-flipping the same few spins.
+as if its ΔE were λ temperatures (λ/β) higher. A tabu spin i still outweighs a free spin k when
+ΔE_i < ΔE_k − λ/β, so a move worth more than λ temperatures, like stepping back down from an expensive climb, still
+happens. Among moves of similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over
+more spins; cold, it keeps the chain moving between low-energy states instead of re-flipping the same few spins.
 
 λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled
 (J, h, β → cJ, ch, β/c) or n grows. The two values are measured, not derived. The tabu breaks detailed balance; an
 optimizer doesn't need it. With the tabu, the anneal reaches lower energies in the same number of flips, and its best
 `beta_max` is about 2× higher than without it.
 
-**Why it's cheap.** A flip changes the ΔE of every spin it couples to. On a dense problem that is all of them, so
-every flip already makes a pass over all n spins, and the selection rides along for free.
-
 ## pfa_native
 
 `pfa_native` runs PFA in compiled C with SIMD, on one core. It targets one kind of problem: dense spin glasses with
-fields and floating-point couplings. It reads a full float64 coupling row per flip, so sparse problems pay for every
+fields and real-valued couplings. It reads a full float64 coupling row per flip, so sparse problems pay for every
 zero, and integer or low-precision couplings gain nothing from their structure. Each flip's update and selection are
 fused into one pass over memory:
 
@@ -88,16 +88,8 @@ fused into one pass over memory:
   φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
   reads nothing extra. Fixed at the flip, the penalty grows as the anneal cools, to λ β/β_flip temperatures.
 
-```python
-from ising_solvers import pfa_native
-
-spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * n, num_reps=10)
-```
-
-`examples/quickstart.py` solves a small problem and measures throughput on a dense one.
-
-Build it once with a C compiler using `make`, which compiles `ising_solvers/native/pfa_native.c` for the current
-machine. That file holds the anneal loop and includes the one SIMD path that matches the target:
+Build it with `make` and any C compiler. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
+which includes the one SIMD path that matches the target:
 
 | path | file | used on |
 |---|---|---|
@@ -107,14 +99,21 @@ machine. That file holds the anneal loop and includes the one SIMD path that mat
 | AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
 | scalar | `pfa_native_scalar.c` | anything else |
 
-`pfa_native.simd_path()` reports which one was built. To build for a different target, override the architecture
-flags, e.g. `make ARCH_FLAGS=-mavx2`.
+`pfa_native.simd_path()` reports which one was built; `make ARCH_FLAGS=-mavx2` builds for another target. Then:
+
+```python
+from ising_solvers import pfa_native
+
+spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
+```
+
+`examples/quickstart.py` solves a small problem and measures throughput on a dense one.
 
 ## pfa_native vs. simulated annealing
 
 The reference is the optimized simulated annealing of Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), on the problems `pfa_native`
-is built for: fully connected, with fields and couplings of any precision. `pfa_native` borrows two of its techniques:
+is built for: fully connected, with fields and real-valued couplings. `pfa_native` borrows two of its techniques:
 stored local fields, so ΔE is read rather than computed, and precomputed random numbers read at random offsets. The
 others (lookup tables for integer couplings, multi-spin coding of 64 replicas, bipartite updates) need low-precision
 couplings, many replicas or sparse graphs. `pfa_native` deliberately runs one replica on one core, and so does the
