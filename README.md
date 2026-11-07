@@ -21,7 +21,7 @@ the work SA needs to reach PFA's energy:
 | problems | SA |
 |---|---|
 | spin glasses | needs **1.5–2×** PFA's work |
-| constrained problems with large penalties | never gets there: with **15–1000×** PFA's work, it still ends above PFA at 10 flips per spin |
+| constrained problems with large penalties | needs **15–1000×** PFA's work, or never gets there |
 
 ## Algorithm
 
