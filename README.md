@@ -87,7 +87,7 @@ selection rides along in the same pass, for free, and a flip costs the same on e
 
 ## Compared with simulated annealing
 
-The reference is simulated annealing with the optimizations of Isakov et al.,
+The reference is simulated annealing (SA) with the optimizations of Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built the same way as
 `pfa_native`: full float64 coupling rows, one replica, one core. `pfa_native` borrows two of its techniques: stored
 local fields, so ΔE is read rather than computed, and precomputed random numbers read at random offsets. The others
