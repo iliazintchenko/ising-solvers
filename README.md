@@ -20,7 +20,7 @@ Against optimized simulated annealing (SA, compared in detail below), with `beta
 |---|---|---|
 | spin glasses | work for the same energy, at every run length tried | SA needs 1.5–2× PFA's work |
 | constrained problems with large penalties | energy at more work for SA | SA with 15× to 1000× PFA's work stays above PFA's energy at 10 flips per spin |
-| cost of a flip | memory traffic per flip | a PFA flip costs 1.2–1.4× an SA flip |
+| cost of a flip | time per executed flip | a PFA flip costs 1.2–1.4× an accepted SA flip; a rejected SA proposal, about 1/n of one |
 
 ## Algorithm
 
@@ -69,10 +69,10 @@ rejects almost every proposal; PFA never rejects. Its two ingredients have PFA c
 | Metropolis acceptance of one proposed spin | Boltzmann selection over all n spins | decides which flip happens |
 | sequential sweeps | tabu | spreads the work over distinct spins |
 
-**Cost per step.** A flip in either method updates all n local fields. Per spin, an SA flip moves 24 bytes: a float64
-coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes each:
-32 bytes, 4/3 of an SA flip. A rejected SA proposal reads one field and one random number, about
-1/n of a flip, so flips set the cost. Work, in SA flips per spin:
+**Cost per step.** A flip in either method updates all n local fields. Per spin, an accepted SA flip moves 24 bytes:
+a float64 coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes
+each: 32 bytes, 4/3 of an accepted SA flip. A rejected SA proposal reads one field and one random number, about 1/n of
+a flip, so flips set the cost. Work, rejections included, in accepted SA flips per spin:
 
 ```
 PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
