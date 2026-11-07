@@ -1,6 +1,6 @@
 # Pretty Fast Annealer
 
-A fast solver for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize
+PFA is a fast solver for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
@@ -12,7 +12,7 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 ΔE_j = −2 s_j (h_j + Σ_k J_jk s_k)
 ```
 
-## The annealer
+## Algorithm
 
 PFA flips one spin per step while the inverse temperature β rises linearly from 0 to `beta_max`. It differs from
 simulated annealing in how it picks the spin.
@@ -66,7 +66,7 @@ more spins; cold, it keeps the chain moving between low-energy states instead of
 optimizer doesn't need it. With the tabu, the anneal reaches lower energies in the same number of flips, and its best
 `beta_max` is about 2× higher than without it.
 
-## pfa_native
+## Implementation
 
 `pfa_native` runs PFA in compiled C with SIMD, on one core. It targets one kind of problem: dense spin glasses with
 fields and real-valued couplings. It reads a full float64 coupling row per flip, so sparse problems pay for every
@@ -88,28 +88,7 @@ fused into one pass over memory:
   φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
   reads nothing extra. Fixed at the flip, the penalty grows as the anneal cools, to λ β/β_flip temperatures.
 
-Build it with `make` and any C compiler. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
-which includes the one SIMD path that matches the target:
-
-| path | file | used on |
-|---|---|---|
-| SVE | `pfa_native_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
-| NEON | `pfa_native_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
-| AVX-512 | `pfa_native_avx512.c` | x86-64 with AVX-512 |
-| AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
-| scalar | `pfa_native_scalar.c` | anything else |
-
-`pfa_native.simd_path()` reports which one was built; `make ARCH_FLAGS=-mavx2` builds for another target. Then:
-
-```python
-from ising_solvers import pfa_native
-
-spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
-```
-
-`examples/quickstart.py` solves a small problem and measures throughput on a dense one.
-
-## pfa_native vs. simulated annealing
+## Compared with simulated annealing
 
 The reference is the optimized simulated annealing of Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), on the problems `pfa_native`
@@ -167,3 +146,26 @@ Written for sparsity, SA updates only the flipped spin's d neighbours, and that 
 still compare all n scores per step, because every new offset and every change of β moves every score. A sparse PFA
 needs per-spin random clocks in a priority queue, as in the n-fold way, at about d log n per flip. That version is not
 compared here.
+
+## Usage
+
+Build it with `make` and any C compiler. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
+which includes the one SIMD path that matches the target:
+
+| path | file | used on |
+|---|---|---|
+| SVE | `pfa_native_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
+| NEON | `pfa_native_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
+| AVX-512 | `pfa_native_avx512.c` | x86-64 with AVX-512 |
+| AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
+| scalar | `pfa_native_scalar.c` | anything else |
+
+`pfa_native.simd_path()` reports which one was built; `make ARCH_FLAGS=-mavx2` builds for another target. Then:
+
+```python
+from ising_solvers import pfa_native
+
+spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
+```
+
+`examples/quickstart.py` solves a small problem and measures throughput on a dense one.
