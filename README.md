@@ -1,6 +1,6 @@
 # Pretty Fast Annealer
 
-PFA is a fast solver for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize
+PFA is a fast solver for Ising problems: find the spins s ∈ {−1, +1}ⁿ that minimize
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
@@ -47,10 +47,7 @@ reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own 
 steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, rather than a shift by one,
 keeps large noise values from marching through neighbouring indices, so results don't depend on the spin order.
 
-**Why it's cheap.** A flip changes the ΔE of every spin it couples to, and updating them is a pass over the spins.
-The selection rides along in that same pass, for free.
-
-**Soft tabu.** For n/4 flips after spin i flips, its weight is divided by e^λ, with λ = 3:
+**Soft tabu.** For the n/4 flips after spin i flips (the tenure), its weight is divided by e^λ, with λ = 3:
 
 ```
 p_i ∝ e^(−β ΔE_i − λ)
@@ -68,9 +65,9 @@ optimizer doesn't need it. With the tabu, the anneal reaches lower energies in t
 
 ## Implementation
 
-`pfa_native` runs PFA in compiled C with SIMD, on one core, on any couplings and fields. Every flip reads one full
-float64 row of couplings, so a flip costs the same on every problem of a given size. Each flip's update and selection
-are fused into one pass over memory:
+`pfa_native` runs PFA in compiled C with SIMD, on one core, on any couplings and fields. A flip changes the ΔE of
+every spin it couples to, so every flip reads one full float64 row of couplings and updates all n spins. The
+selection rides along in the same pass, for free, and a flip costs the same on every problem of a given size:
 
 - **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. Flipping spin
   i adds −s_i J_ij to every φ_j (s_i before the flip): one pass over row i of the couplings, read in place. After F
@@ -89,7 +86,7 @@ are fused into one pass over memory:
 
 ## Compared with simulated annealing
 
-The reference is the optimized simulated annealing of Isakov et al.,
+The reference is simulated annealing with the optimizations of Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built the same way as
 `pfa_native`: full float64 coupling rows, one replica, one core. `pfa_native` borrows two of its techniques: stored
 local fields, so ΔE is read rather than computed, and precomputed random numbers read at random offsets. The others
@@ -133,21 +130,21 @@ p_i ∝ e^(−β ΔO_i)
 
 The objective alone chooses which constraint to break, whatever P is, and PFA leaves every state in one step, at any
 β. It can run cold enough to resolve the objective without freezing on the constraints. This advantage belongs to
-rejection-free selection as such, and here that selection is free.
+rejection-free selection as such, and in `pfa_native` that selection is free.
 
 **Long runs.** Long anneals spend most of their time cold, where what counts is how far the chain still moves without
 climbing. At a fixed low temperature, PFA sits lower in energy than SA and still drifts further from where it started.
 (Equal temperature means PFA at β against SA at 2β.)
 
-**Sparse problems.** Both implementations read full coupling rows, so on sparse problems the comparison is unchanged.
-Written for sparsity, SA updates only the flipped spin's d neighbours, and that is all it needs. PFA's selection would
-still compare all n scores per step, because every new offset and every change of β moves every score. A sparse PFA
-needs per-spin random clocks in a priority queue, as in the n-fold way, at about d log n per flip. That version is not
-compared here.
+**Sparse implementations.** Both implementations read full coupling rows, so on sparse problems the comparison is
+unchanged. Written for sparsity, SA updates only the flipped spin's d neighbours, and that is all it needs. PFA's
+selection would still compare all n scores per step, because every new offset and every change of β moves every score.
+A sparse PFA needs per-spin random clocks in a priority queue, as in the n-fold way, at about d log n per flip. That
+version is not compared here.
 
 ## Usage
 
-Build it with `make` and any C compiler. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
+Build with `make` and any C compiler. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
 which includes the one SIMD path that matches the target:
 
 | path | file | used on |
@@ -166,4 +163,4 @@ from ising_solvers import pfa_native
 spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
 ```
 
-`examples/quickstart.py` solves a small problem and measures throughput on a dense one.
+`examples/quickstart.py` solves a small problem and measures flips per second.
