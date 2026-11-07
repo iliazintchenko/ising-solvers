@@ -57,7 +57,7 @@ balance, which an optimizer doesn't need. It roughly doubles the best `beta_max`
 
 ## Compared with simulated annealing
 
-The reference is SA as optimized by Isakov et al.,
+SA here follows Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built like PFA's
 implementation: full float64 coupling rows, one replica, one core. Their tricks for low-precision couplings, many
 replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
