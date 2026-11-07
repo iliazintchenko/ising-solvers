@@ -12,6 +12,17 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 ΔE_j = −2 s_j (h_j + Σ_k J_jk s_k)
 ```
 
+## Results
+
+Against optimized simulated annealing (SA, compared in detail below), with `beta_max` tuned for every run length:
+
+| what | measured as | result |
+|---|---|---|
+| spin glasses | work for the same energy, at every run length tried | SA needs 1.5–2× PFA's work |
+| constrained problems with large penalties | energy at more work for SA | SA with 15× to 1000× PFA's work stays above PFA's energy at 10 flips per spin |
+| cost of a flip | memory traffic per flip | a PFA flip costs 1.2–1.4× an SA flip |
+| the tabu | flips for the same energy, against PFA without it | 2–4× fewer flips |
+
 ## Algorithm
 
 Each step flips one spin, chosen from all n with probability
@@ -42,12 +53,11 @@ keeps the chain moving between low-energy states instead of re-flipping the same
 
 λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled
 (J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and fixed. The tabu breaks detailed
-balance, which an optimizer doesn't need. It reaches lower energies in the same number of flips, and roughly doubles
-the best `beta_max`.
+balance, which an optimizer doesn't need. It roughly doubles the best `beta_max`.
 
 ## Compared with simulated annealing
 
-The reference is simulated annealing (SA) as optimized by Isakov et al.,
+The reference is SA as optimized by Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built like PFA's
 implementation: full float64 coupling rows, one replica, one core. Their tricks for low-precision couplings, many
 replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
@@ -62,7 +72,7 @@ rejects almost every proposal; PFA never rejects. Its two ingredients have PFA c
 
 **Cost per step.** A flip in either method updates all n local fields. Per spin, an SA flip moves 24 bytes: a float64
 coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes each:
-32 bytes, 4/3 of an SA flip (measured: 1.2–1.4×). A rejected SA proposal reads one field and one random number, about
+32 bytes, 4/3 of an SA flip. A rejected SA proposal reads one field and one random number, about
 1/n of a flip, so flips set the cost. Work, in SA flips per spin:
 
 ```
@@ -70,8 +80,7 @@ PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
 ```
 
 **Descent.** Metropolis accepts every downhill move, so it takes them in sweep order, whatever their size. PFA
-weights each by e^(β |ΔE_j|) and takes the biggest first. Each PFA flip does more of the descent, and the flips saved
-outweigh the 4/3.
+weights each by e^(β |ΔE_j|) and takes the biggest first. Each PFA flip does more of the descent.
 
 **Sweeps and the tabu.** Random proposals repeat some spins and miss others: after n of them, 1/e ≈ 37% of the spins
 are still untried. A sweep proposes each spin once per n proposals, and does better. PFA has no proposals to order;
