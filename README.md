@@ -80,13 +80,12 @@ selection rides along in the same pass, for free, and a flip costs the same on e
 
   one multiply and one fused multiply-add per spin, in float32. Rounding can change a pick only when two scores agree
   to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸).
-- **Argmax without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles the
-  selection work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE) reached
-  the largest one.
-  Afterwards it rescores that chunk, still in cache, and returns its first spin at the maximum. The extra cost is one
-  reduction per chunk plus 64 rescored spins per flip, about 64/n of a pass. The rescore repeats the pass's float
-  operations exactly (the build forbids fusing multiply-adds), so it finds the same maximum, and ties go to the
-  smallest index.
+- **Argmax without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles
+  the selection work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE)
+  reached the largest one. Afterwards it rescores that chunk, still in cache, and returns its first spin at the
+  maximum. The extra cost is one reduction per chunk plus 64 rescored spins per flip, about 64/n of a pass. The
+  rescore repeats the pass's float operations exactly (the build forbids fusing multiply-adds), so it finds the same
+  maximum, and ties go to the smallest index.
 - **Tabu for free.** The penalty, c_i = λ / (4β) in score units, is folded into the stored field,
   φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
   reads nothing extra. Fixed at the flip, the penalty grows as the anneal cools, to λ β/β_flip temperatures.
