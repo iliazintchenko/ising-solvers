@@ -135,26 +135,34 @@ held fixed between rebuilds. That version is not compared here.
 
 `pfa_native` runs PFA in compiled C with SIMD, on one core, on any couplings and fields. A flip changes the ΔE of
 every spin it couples to, so every flip reads one full float64 row of couplings and updates all n local fields. The
-selection rides along in the same pass, for free, and a flip costs the same on every problem of a given size:
+selection rides along in the same pass, and a flip costs the same on every problem of a given size. The tricks:
 
-- **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. Flipping spin
-  i adds −s_i J_ij to every φ_j (s_i before the flip). After F flips, rounding has added at most about F · 2⁻⁵³ of
-  the largest field: negligible.
+- **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. After F flips,
+  rounding has added at most about F · 2⁻⁵³ of the largest field: negligible.
+- **Add or subtract, chosen once.** Flipping spin i changes every φ_j by −s_i J_ij, with s_i = ±1 fixed for the whole
+  pass. So the pass is a plain subtract or add of row i, read in place: no multiply, no spin load. φ_i itself does not
+  change when i flips.
 - **Scores.** Dividing −β ΔE_j + g_j by 4β leaves the argmax unchanged and gives
 
   ```
   s_j φ_j + g_j / (4β)
   ```
 
-computed in float32. Rounding can change a pick only when two scores agree to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸). - **Argmax
-without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles the selection
-work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE) reached the largest
-one. Afterwards it rescores that chunk, still in cache, and returns its first spin at the maximum. The extra cost is
-one reduction per chunk plus 64 rescored spins per flip, about 64/n of a pass. The rescore repeats the pass's float
-operations exactly (the build stops the compiler from fusing multiply-adds on its own), so it finds the same maximum,
-and ties go to the smallest index. - **Tabu for free.** The penalty, c_i = λ / (4β_i) in score units, is folded into
-the stored field, φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips
-again. The pass reads nothing extra.
+  computed in float32, with spins stored as float32 ±1, so no branch. Rounding can change a pick only when two scores
+  agree to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸).
+- **Noise stored twice.** The Gumbel vector is stored as g followed by g, so the n values from any offset are one
+  contiguous stretch: no wraparound, no modulo. Offsets come from a xorshift64* generator, mapped to [0, n) by a
+  multiply and a shift, without division.
+- **Argmax without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles
+  the selection work. The pass instead keeps only maxima and records which chunk of 64 spins (8 vectors on SVE)
+  reached the largest one. Afterwards it rescores that chunk, still in cache, and returns its first spin at the
+  maximum: about 64/n of a pass extra. The rescore repeats the pass's float operations exactly (the build stops the
+  compiler from fusing multiply-adds on its own), so it finds the same maximum, and ties go to the smallest index.
+- **Tabu for free.** The penalty, c_i = λ / (4β_i) in score units, is folded into the stored field,
+  φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
+  reads nothing extra; the anneal loop adds and removes shifts at O(1) per flip.
+- **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when E
+  reaches a new low.
 
 ## Usage
 
@@ -169,8 +177,8 @@ which includes the one SIMD path that matches the target:
 | AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
 | scalar | `pfa_native_scalar.c` | anything else |
 
-`pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another target.
-Then:
+`pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
+target. Then:
 
 ```python
 from ising_solvers import pfa_native
