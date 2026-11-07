@@ -1,6 +1,6 @@
 # Pretty Fast Annealer
 
-Fast solvers for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize
+A fast solver for the Ising spin glass problem: find the spins s ∈ {−1, +1}ⁿ that minimize
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
@@ -14,9 +14,8 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 
 ## The annealer
 
-Every solver here runs the same annealer, PFA (`pfa_native` adds one refinement, below). It flips one spin per step
-while the inverse temperature β rises linearly from 0 to `beta_max`. It differs from simulated annealing in one
-thing: how it picks the spin.
+PFA flips one spin per step while the inverse temperature β rises linearly from 0 to `beta_max`. It differs from
+simulated annealing in how it picks the spin.
 
 Simulated annealing proposes a random spin and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal
 cools, it rejects almost every proposal.
@@ -48,25 +47,31 @@ reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own 
 steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, rather than a shift by one,
 keeps large noise values from marching through neighbouring indices, so results don't depend on the spin order.
 
+**Soft tabu.** For n/4 flips after spin i flips, its weight is divided by e^λ, with λ = 3:
+
+```
+p_i ∝ e^(−β ΔE_i − λ)
+```
+
+as if its ΔE were λ temperatures (λ/β) higher. A tabu spin i still beats a free spin k when ΔE_i < ΔE_k − λ/β, so a
+move worth more than λ temperatures, like stepping back down from an expensive climb, still happens. Among moves of
+similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over more spins; cold, it keeps
+the chain moving between low-energy states instead of re-flipping the same few spins.
+
+λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled
+(J, h, β → cJ, ch, β/c) or n grows. The two values are measured, not derived. The tabu breaks detailed balance; an
+optimizer doesn't need it. With the tabu, the anneal reaches lower energies in the same number of flips, and its best
+`beta_max` is about 2× higher than without it.
+
 **Why it's cheap.** A flip changes the ΔE of every spin it couples to. On a dense problem that is all of them, so
 every flip already makes a pass over all n spins, and the selection rides along for free.
 
-## Solvers
+## pfa_native
 
-| module | runs on |
-|---|---|
-| `pfa_plain` | numpy, one repetition; the readable reference |
-| `pfa_cpu` | numpy, many repetitions at once |
-| `pfa_gpu` | PyTorch on a GPU |
-| `pfa_tpu` | PyTorch/XLA on a TPU |
-| `pfa_native` | compiled C with SIMD, one core |
-
-`pfa_native` targets one kind of problem: dense spin glasses with fields and floating-point couplings. It reads a
-full float64 coupling row per flip, so sparse problems pay for every zero, and integer or low-precision couplings gain
-nothing from their structure.
-
-It runs the algorithm of `pfa_plain` with one addition, a soft tabu, and fuses each flip's update and selection into
-one pass over memory:
+`pfa_native` runs PFA in compiled C with SIMD, on one core. It targets one kind of problem: dense spin glasses with
+fields and floating-point couplings. It reads a full float64 coupling row per flip, so sparse problems pay for every
+zero, and integer or low-precision couplings gain nothing from their structure. Each flip's update and selection are
+fused into one pass over memory:
 
 - **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. Flipping spin
   i adds −s_i J_ij to every φ_j (s_i before the flip): one pass over row i of the couplings, read in place. After F
@@ -79,27 +84,17 @@ one pass over memory:
 
   one multiply and one fused multiply-add per spin, in float32. Rounding can change a pick only when two scores agree
   to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸).
-- **Soft tabu.** For n/4 flips after spin i flips, its weight is divided by e^λ, with λ = 3:
+- **Tabu for free.** The penalty, c_i = λ / (4β) in score units, is folded into the stored field,
+  φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
+  reads nothing extra. Fixed at the flip, the penalty grows as the anneal cools, to λ β/β_flip temperatures.
 
-  ```
-  p_i ∝ e^(−β ΔE_i − λ)
-  ```
+```python
+from ising_solvers import pfa_native
 
-  as if its ΔE were λ temperatures (λ/β) higher. A tabu spin i still beats a free spin k when ΔE_i < ΔE_k − λ/β, so a
-  move worth more than λ temperatures, like stepping back down from an expensive climb, still happens. Among moves of
-  similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over more spins; cold, it
-  keeps the chain moving between low-energy states instead of re-flipping the same few spins.
+spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * n, num_reps=10)
+```
 
-  It costs nothing per spin. The penalty, c_i = λ / (4β) in score units, is folded into the stored field,
-  φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. Fixed at
-  the flip, it grows as the anneal cools, to λ β/β_flip temperatures.
-
-  λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled
-  (J, h, β → cJ, ch, β/c) or n grows. The two values are measured, not derived. The tabu breaks detailed balance; an
-  optimizer doesn't need it.
-
-  With the tabu, the anneal reaches lower energies in the same number of flips, and its best `beta_max` is about 2×
-  that of the other solvers.
+`examples/quickstart.py` solves a small problem and measures throughput on a dense one.
 
 Build it once with a C compiler using `make`, which compiles `ising_solvers/native/pfa_native.c` for the current
 machine. That file holds the anneal loop and includes the one SIMD path that matches the target:

@@ -45,24 +45,14 @@ def run(
     seed: int = 42,
 ) -> np.ndarray:
     """
-    Attempts to find the ground state configuration of an Ising spin glass
-    using PFA - a Pretty Fast implementation of the simulated Annealing
-    algorithm. Same algorithm as pfa_plain, compiled to native SIMD code on a
-    single core: each flip updates the local fields and selects the next spin
-    in one pass over memory.
-
-    Four differences from pfa_plain: fields enter the local fields directly
-    instead of through a dummy spin (so the move that flips all spins at once
-    is absent); each step reads the noise vector from a random offset instead
-    of shifting it by one, so results do not depend on how the spins are
-    ordered; the selection scores are compared in float32, which changes a
-    pick only when two scores agree to about 7 digits; and a soft tabu lowers
-    the score of each spin flipped within the last n/4 flips by 3
-    temperatures (its selection weight divided by e^3). The soft tabu finds
-    lower energies at the same number of flips; its best beta_max is about 2x
-    higher than without it. Local fields and energies are float64. The
-    couplings are read in place, without a copy, when they are a C-contiguous
-    float64 array.
+    Attempts to find the ground state of an Ising spin glass with PFA, a
+    rejection-free annealer (see the README): every step flips one spin,
+    chosen with probability proportional to exp(-beta * dE) by Gumbel-max
+    sampling, while beta rises linearly from 0 to beta_max. Spins flipped in
+    the last n/4 flips have their weight divided by e^3 (a soft tabu). Compiled
+    to native SIMD code on one core: each flip updates the local fields and
+    selects the next spin in one pass over memory. The couplings are read in
+    place, without a copy, when they are a C-contiguous float64 array.
 
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
