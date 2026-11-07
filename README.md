@@ -12,16 +12,16 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 ΔE_j = −2 s_j (h_j + Σ_k J_jk s_k)
 ```
 
-## Results
+## Results vs. Simulated Annealing
 
 The reference is optimized simulated annealing (SA, details below), each method with `beta_max` tuned for every run
 length. A PFA flip costs **1.2–1.4×** an accepted SA flip, and a rejected SA proposal about 1/n of one. Counting both,
-the work SA needs to reach PFA's energy:
+PFA reaches the same energy faster by:
 
-| problems | SA |
+| problems | speedup |
 |---|---|
-| spin glasses | needs **1.5–2×** PFA's work |
-| constrained problems with large penalties | needs **15–1000×** PFA's work, or never gets there |
+| spin glasses | **1.5–2×** |
+| constrained problems with large penalties | **15–1000×**, or SA never gets there |
 
 ## Algorithm
 
