@@ -178,8 +178,8 @@ update pass visits every spin anyway.
 
 **Long runs.** In long anneals most of the run is spent cold, and what counts there is how far the chain still moves
 without climbing. Held at a fixed low temperature, PFA with the soft tabu sits at a lower energy than SA and still
-drifts further from where it started. PFA without the tabu drifts no further than SA. So in long runs the advantage
-comes from the tabu. (Equal temperature means PFA at β against SA at 2β, from the equilibrium above.)
+drifts further from where it started: the soft tabu keeps it moving. (Equal temperature means PFA at β against SA
+at 2β, from the equilibrium above.)
 
 **Sparse problems.** Both implementations read full coupling rows, so a sparse problem costs each the same as a dense
 one, and the comparison carries over. An implementation written for sparse problems updates only the flipped spin's d
