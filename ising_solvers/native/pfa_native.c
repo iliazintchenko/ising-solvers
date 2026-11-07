@@ -14,7 +14,7 @@
 // through the spin indices, which ties results to how the spins happen to be ordered.
 // Selection keeps only a running maximum per chunk of 64 spins; afterwards the winning chunk is rescored
 // with the same operations to find the first spin that reaches the maximum.
-// Soft tabu: for the n/4 flips after a spin flips, its dE is raised by 3 temperatures at the time of its flip
+// Tabu: for the n/4 flips after a spin flips, its dE is raised by 3 temperatures at the time of its flip
 // (3 / beta_i): its rate is divided by e^3 right after the flip and by more as the anneal cools. This spreads the flips over more distinct spins, mostly while the anneal is still hot; a flip worth many
 // more temperatures (such as stepping back down from an expensive climb) still wins. The penalty is applied by
 // shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = 3 / (4 beta) at the time of its flip,
@@ -99,7 +99,7 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 
 const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 
-#define TABU_LAMBDA 3.0   // soft tabu penalty, in temperatures; the tabu list holds the last n/4 flips
+#define TABU_LAMBDA 3.0   // tabu penalty, in temperatures; the tabu list holds the last n/4 flips
 // pen[j]: the shift c_j currently applied to phi[j] (0 when j is not tabu); last[j]: step of j's last flip;
 // recent[t % tenure]: the spin flipped at step t.
 ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, const float *noise, int n, long nflips,

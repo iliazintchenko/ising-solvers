@@ -23,12 +23,12 @@ p_j = e^(−β ΔE_j) / Σ_k e^(−β ΔE_k)
 while the inverse temperature β rises linearly from 0 to `beta_max`. Downhill flips are strongly favored; uphill flips
 stay possible.
 
-**What it samples.** Read as a continuous-time process, each flip fires at rate e^(−β ΔE) and its reverse at
+**Equilibrium.** Read as a continuous-time process, each flip fires at rate e^(−β ΔE) and its reverse at
 e^(+β ΔE). The ratio e^(−2β ΔE) is detailed balance for e^(−2β E): at β, PFA equilibrates at 2β. Skipping the waiting
 times also weights each state by its exit rate R(s) = Σ_k e^(−β ΔE_k), favoring states with many cheap exits. An
 optimizer doesn't care: it keeps the best state it has seen.
 
-**Soft tabu.** When spin i flips at inverse temperature β_i, its ΔE is raised by λ/β_i, λ = 3 temperatures, for the
+**Tabu.** When spin i flips at inverse temperature β_i, its ΔE is raised by λ/β_i, λ = 3 temperatures, for the
 next n/4 flips (the tenure):
 
 ```
@@ -59,7 +59,7 @@ rejects almost every proposal; PFA never rejects. Each ingredient of optimized S
 | optimized SA | PFA | what it does |
 |---|---|---|
 | Metropolis acceptance of one proposed spin | Boltzmann selection over all n spins | decides which flip happens |
-| sequential sweeps | soft tabu | spreads the work over distinct spins |
+| sequential sweeps | tabu | spreads the work over distinct spins |
 | stored local fields | stored local fields | ΔE is read, not computed |
 | precomputed random numbers at random offsets | one Gumbel vector at random offsets | cheap randomness |
 
@@ -78,7 +78,7 @@ outweigh the 4/3.
 
 **Sweeps and the tabu.** Random proposals repeat some spins and miss others: after n of them, 1/e ≈ 37% of the spins
 are still untried. A sweep proposes each spin once per n proposals, and does better. PFA has no proposals to order;
-its repeat-avoidance is the soft tabu. A sweep is a hard rule on proposals that keeps the Boltzmann distribution
+its repeat-avoidance is the tabu. A sweep is a hard rule on proposals that keeps the Boltzmann distribution
 stationary; the tabu is a soft rule on flips that does not.
 
 **Constraints.** Many hard problems are an objective plus constraints written as penalties:

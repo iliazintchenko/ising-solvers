@@ -50,7 +50,7 @@ def run(
     chosen with probability proportional to exp(-beta * dE) by Gumbel-max
     sampling, while beta rises linearly from 0 to beta_max. For the n/4 flips
     after a spin flips, its dE is raised by 3 temperatures at the time of its
-    flip (a soft tabu). Compiled
+    flip (a tabu). Compiled
     to native SIMD code on one core: each flip updates the local fields and
     selects the next spin in one pass over memory. The couplings are read in
     place, without a copy, when they are a C-contiguous float64 array.
