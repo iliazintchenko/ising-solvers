@@ -21,7 +21,6 @@ Against optimized simulated annealing (SA, compared in detail below), with `beta
 | spin glasses | work for the same energy, at every run length tried | SA needs 1.5–2× PFA's work |
 | constrained problems with large penalties | energy at more work for SA | SA with 15× to 1000× PFA's work stays above PFA's energy at 10 flips per spin |
 | cost of a flip | memory traffic per flip | a PFA flip costs 1.2–1.4× an SA flip |
-| the tabu | flips for the same energy, against PFA without it | 2–4× fewer flips |
 
 ## Algorithm
 
