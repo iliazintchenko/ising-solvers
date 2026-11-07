@@ -47,8 +47,8 @@ reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own 
 steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, rather than a shift by one,
 keeps large noise values from marching through neighbouring indices, so results don't depend on the spin order.
 
-**Why it's cheap.** A flip changes the ΔE of every spin it couples to. On a dense problem that is all of them, so
-every flip already makes a pass over all n spins, and the selection rides along for free.
+**Why it's cheap.** A flip changes the ΔE of every spin it couples to, and updating them is a pass over the spins.
+The selection rides along in that same pass, for free.
 
 **Soft tabu.** For n/4 flips after spin i flips, its weight is divided by e^λ, with λ = 3:
 
@@ -68,10 +68,9 @@ optimizer doesn't need it. With the tabu, the anneal reaches lower energies in t
 
 ## Implementation
 
-`pfa_native` runs PFA in compiled C with SIMD, on one core. It targets one kind of problem: dense spin glasses with
-fields and real-valued couplings. It reads a full float64 coupling row per flip, so sparse problems pay for every
-zero, and integer or low-precision couplings gain nothing from their structure. Each flip's update and selection are
-fused into one pass over memory:
+`pfa_native` runs PFA in compiled C with SIMD, on one core, on any couplings and fields. Every flip reads one full
+float64 row of couplings, so a flip costs the same on every problem of a given size. Each flip's update and selection
+are fused into one pass over memory:
 
 - **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. Flipping spin
   i adds −s_i J_ij to every φ_j (s_i before the flip): one pass over row i of the couplings, read in place. After F
@@ -91,17 +90,16 @@ fused into one pass over memory:
 ## Compared with simulated annealing
 
 The reference is the optimized simulated annealing of Isakov et al.,
-[Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), on the problems `pfa_native`
-is built for: fully connected, with fields and real-valued couplings. `pfa_native` borrows two of its techniques:
-stored local fields, so ΔE is read rather than computed, and precomputed random numbers read at random offsets. The
-others (lookup tables for integer couplings, multi-spin coding of 64 replicas, bipartite updates) need low-precision
-couplings, many replicas or sparse graphs. `pfa_native` deliberately runs one replica on one core, and so does the
-comparison.
+[Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built the same way as
+`pfa_native`: full float64 coupling rows, one replica, one core. `pfa_native` borrows two of its techniques: stored
+local fields, so ΔE is read rather than computed, and precomputed random numbers read at random offsets. The others
+(lookup tables for integer couplings, multi-spin coding of 64 replicas, bipartite updates) exploit low-precision
+couplings, many replicas or sparse graphs, and are left out on both sides.
 
 **Cost per step.** A flip in either method updates all n fields. Per spin, an SA flip moves 24 bytes: a float64
 coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes each:
 32 bytes, 4/3 of an SA flip (measured: 1.2–1.4×). A rejected SA proposal reads one field and one random number, about
-1/n of a flip. On dense problems rejections are nearly free and flips set the cost. In SA flips per spin:
+1/n of a flip. Rejections are nearly free, and flips set the cost. In SA flips per spin:
 
 ```
 PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
@@ -135,7 +133,7 @@ p_i ∝ e^(−β ΔO_i)
 
 The objective alone chooses which constraint to break, whatever P is, and PFA leaves every state in one step, at any
 β. It can run cold enough to resolve the objective without freezing on the constraints. This advantage belongs to
-rejection-free selection as such; on dense problems, that selection is free.
+rejection-free selection as such, and here that selection is free.
 
 **Long runs.** Long anneals spend most of their time cold, where what counts is how far the chain still moves without
 climbing. At a fixed low temperature, PFA sits lower in energy than SA and still drifts further from where it started.
