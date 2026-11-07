@@ -163,4 +163,17 @@ from ising_solvers import pfa_native
 spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
 ```
 
+It returns the lowest-energy state seen, as ±1 spins (int8).
+
+| parameter | what it is | default | theory |
+|---|---|---|---|
+| `couplings` | J, an n × n symmetric matrix with zero diagonal | required | Read in place when it is a C-contiguous float64 array, otherwise copied once. Its precision and sparsity do not change the cost of a flip. |
+| `fields` | h, a length-n vector | `None` (zeros) | Folded into the local fields φ, so fields cost nothing per flip. |
+| `beta_max` | the final inverse temperature; β rises linearly from 0 to `beta_max` over the run | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only flips whose |ΔE| is of order one. PFA at β equilibrates at 2β, and the soft tabu raises the best `beta_max` about 2×. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
+| `num_flips` | flips per repetition, the length of the anneal | `1000` | Every step is a flip, so this is the whole budget: cost is num_flips · n spin updates. num_flips / n is the number of flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
+| `num_reps` | independent repetitions | `1` | Each starts from fresh random spins and noise; the best state over all of them is returned. Cost is linear in `num_reps`. |
+| `seed` | random seed | `42` | Sets the initial spins, the Gumbel noise vector and the per-step offsets, so runs are reproducible. |
+
+The soft tabu's λ = 3 and tenure n/4 are fixed, not parameters. Both are scale-free, in temperatures and in fractions of n.
+
 `examples/quickstart.py` solves a small problem and measures flips per second.
