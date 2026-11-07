@@ -1,6 +1,6 @@
 # Pretty Fast Annealer
 
-PFA is a fast solver for Ising problems: find the spins s ∈ {−1, +1}ⁿ that minimize
+PFA solves Ising problems: find the spins s ∈ {−1, +1}ⁿ that minimize
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
@@ -14,7 +14,7 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 
 ## Algorithm
 
-PFA flips one spin per step, chosen from all n with probability
+Each step flips one spin, chosen from all n with probability
 
 ```
 p_j = e^(−β ΔE_j) / Σ_k e^(−β ΔE_k)
@@ -23,11 +23,10 @@ p_j = e^(−β ΔE_j) / Σ_k e^(−β ΔE_k)
 while the inverse temperature β rises linearly from 0 to `beta_max`. Downhill flips are strongly favored; uphill flips
 stay possible.
 
-**What it samples.** As a continuous-time process, a flip with energy change ΔE happens at rate e^(−β ΔE) and its
-reverse at rate e^(+β ΔE). Their ratio, e^(−2β ΔE), is detailed balance for e^(−2β E): PFA at β equilibrates at 2β.
-Taking one flip per step, without the waiting times, also weights each state by its total exit rate
-R(s) = Σ_k e^(−β ΔE_k), so states with many cheap exits are visited more often. An optimizer doesn't care: it keeps
-the best state it has seen.
+**What it samples.** Read as a continuous-time process, each flip fires at rate e^(−β ΔE) and its reverse at
+e^(+β ΔE). The ratio e^(−2β ΔE) is detailed balance for e^(−2β E): at β, PFA equilibrates at 2β. Skipping the waiting
+times also weights each state by its exit rate R(s) = Σ_k e^(−β ΔE_k), favoring states with many cheap exits. An
+optimizer doesn't care: it keeps the best state it has seen.
 
 **Sampling a step.** Drawing from p_j directly costs n exponentials and a normalization per step. The
 [Gumbel-max trick](https://lips.cs.princeton.edu/the-gumbel-max-trick-for-discrete-distributions/) removes both: with
@@ -39,11 +38,11 @@ P( argmax_j (−β ΔE_j + g_j) = i ) = p_i
 
 so picking a spin costs one multiply, one add and one comparison per spin. The noise is drawn once: at step t, spin j
 reads g_((j + o_t) mod n), with a fresh random offset o_t. Each step on its own is exact Gumbel-max sampling; across
-steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, rather than a shift by one,
-keeps large noise values from marching through neighbouring indices, so results don't depend on the spin order.
+steps the same values return permuted, a cheap stand-in for fresh noise. A random offset, unlike a shift by one, keeps
+large values from marching through neighbouring indices, so results don't depend on the spin order.
 
-**Soft tabu.** When spin i flips, at inverse temperature β_i, its ΔE is raised by λ/β_i, λ = 3 temperatures at that
-moment, for the next n/4 flips (the tenure):
+**Soft tabu.** When spin i flips at inverse temperature β_i, its ΔE is raised by λ/β_i, λ = 3 temperatures, for the
+next n/4 flips (the tenure):
 
 ```
 p_i ∝ e^(−β (ΔE_i + λ/β_i))
@@ -55,20 +54,20 @@ move worth more than the penalty, like stepping back down from an expensive clim
 similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads the flips over more spins; cold, it
 keeps the chain moving between low-energy states instead of re-flipping the same few spins.
 
-λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled (J, h, β →
-cJ, ch, β/c) or n grows. The two values are measured, not derived, and fixed in the code. The tabu breaks detailed
-balance; an optimizer doesn't need it. With the tabu, the anneal reaches lower energies in the same number of flips,
-and its best `beta_max` is about 2× higher than without it.
+λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled
+(J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and fixed. The tabu breaks detailed
+balance, which an optimizer doesn't need. It reaches lower energies in the same number of flips, and roughly doubles
+the best `beta_max`.
 
 ## Compared with simulated annealing
 
-The reference is simulated annealing (SA) with the optimizations of Isakov et al., [Optimised simulated annealing for
-Ising spin glasses](https://arxiv.org/abs/1401.1084), built the same way as PFA's implementation below: full float64
-coupling rows, one replica, one core. Its optimizations for low-precision couplings, many replicas or sparse graphs
-(lookup tables, multi-spin coding of 64 replicas, bipartite updates) are left out on both sides.
+The reference is simulated annealing (SA) as optimized by Isakov et al.,
+[Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built like PFA's
+implementation: full float64 coupling rows, one replica, one core. Their tricks for low-precision couplings, many
+replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
 
-SA proposes a random spin and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it rejects
-almost every proposal. PFA never rejects. Each ingredient of optimized SA has a counterpart in PFA:
+SA proposes one spin at a time and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it
+rejects almost every proposal; PFA never rejects. Each ingredient of optimized SA has a counterpart in PFA:
 
 | optimized SA | PFA | what it does |
 |---|---|---|
@@ -80,7 +79,7 @@ almost every proposal. PFA never rejects. Each ingredient of optimized SA has a 
 **Cost per step.** A flip in either method updates all n local fields. Per spin, an SA flip moves 24 bytes: a float64
 coupling read, a float64 field read and written. A PFA flip also reads the spin and its noise value, 4 bytes each:
 32 bytes, 4/3 of an SA flip (measured: 1.2–1.4×). A rejected SA proposal reads one field and one random number, about
-1/n of a flip, so flips set the cost. In SA flips per spin:
+1/n of a flip, so flips set the cost. Work, in SA flips per spin:
 
 ```
 PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
@@ -90,10 +89,10 @@ PFA:  (4/3) · flips / n          SA:  (accepted flips + proposals / n) / n
 weights each by e^(β |ΔE_j|) and takes the biggest first. Each PFA flip does more of the descent, and the flips saved
 outweigh the 4/3.
 
-**Sweeps and the tabu.** SA that picks spins at random proposes some spins again and again while missing others:
-after n proposals, about 1/e ≈ 37% of the spins have never been tried. Sweeping in order proposes every spin once per
-n proposals, and does better. PFA has no proposals to order; its repeat-avoidance is the soft tabu. A sweep is a hard
-rule on proposals that keeps the Boltzmann distribution stationary; the tabu is a soft rule on flips that does not.
+**Sweeps and the tabu.** Random proposals repeat some spins and miss others: after n of them, 1/e ≈ 37% of the spins
+are still untried. A sweep proposes each spin once per n proposals, and does better. PFA has no proposals to order;
+its repeat-avoidance is the soft tabu. A sweep is a hard rule on proposals that keeps the Boltzmann distribution
+stationary; the tabu is a soft rule on flips that does not.
 
 **Constraints.** Many hard problems are an objective plus constraints written as penalties:
 
@@ -118,30 +117,29 @@ p_i ∝ e^(−β ΔO_i)
 ```
 
 The objective alone chooses which constraint to break, whatever P is, and PFA leaves every state in one step, at any
-β. It can run cold enough to resolve the objective without freezing on the constraints. This advantage belongs to
-rejection-free selection as such.
+β. It can run cold enough to resolve the objective without freezing on the constraints. Any rejection-free method has
+this advantage.
 
 **Long runs.** Late in the anneal, what counts is how far the chain still moves without climbing. At a fixed low
 temperature, PFA sits lower in energy than SA and still drifts further from where it started. (Equal temperature means
 PFA at β against SA at 2β.)
 
 **Sparse implementations.** The comparison holds on sparse problems as it stands. Written for sparsity, SA updates
-only the flipped spin's d neighbours, and that is all it needs. PFA's selection would still compare all n scores per
-step, because every new offset and every change of β moves every score. A sparse PFA needs a sum tree over the rates
+only the flipped spin's d neighbours, and that is all it needs. PFA's selection would still compare all n weights per
+step, because every new offset and every change of β moves every weight. A sparse PFA needs a sum tree over the rates
 (the n-fold way) or a priority queue of random clocks (the next-reaction method), at about d log n per flip with β
 held fixed between rebuilds. That version is not compared here.
 
 ## Implementation
 
-`pfa_native` runs PFA in compiled C with SIMD, on one core, on any couplings and fields. A flip changes the ΔE of
-every spin it couples to, so every flip reads one full float64 row of couplings and updates all n local fields. The
-selection rides along in the same pass, and a flip costs the same on every problem of a given size. The tricks:
+The annealer runs in compiled C with SIMD, on one core, on any couplings and fields. Every flip reads one full
+float64 row of couplings, zeros included, and updates all n local fields; the selection rides along in the same pass.
+A flip therefore costs the same on every problem of a given size. The tricks:
 
 - **Local fields.** Each spin stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64, so ΔE_j = −4 s_j φ_j. After F flips,
   rounding has added at most about F · 2⁻⁵³ of the largest field: negligible.
-- **Add or subtract, chosen once.** Flipping spin i changes every φ_j by −s_i J_ij, with s_i = ±1 fixed for the whole
-  pass. So the pass is a plain subtract or add of row i, read in place: no multiply, no spin load. φ_i itself does not
-  change when i flips.
+- **Add or subtract, chosen once.** Flipping spin i changes every φ_j by −s_i J_ij. With s_i = ±1 fixed for the pass,
+  that is a plain subtract or add of row i, read in place: no multiply, no spin load. φ_i itself does not change.
 - **Scores.** Dividing −β ΔE_j + g_j by 4β leaves the argmax unchanged and gives
 
   ```
@@ -166,8 +164,8 @@ selection rides along in the same pass, and a flip costs the same on every probl
 
 ## Usage
 
-Build with `make` and GCC or Clang. This compiles `ising_solvers/native/pfa_native.c` for the current machine,
-which includes the one SIMD path that matches the target:
+`make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine, with the one SIMD path
+that matches it:
 
 | path | file | used on |
 |---|---|---|
