@@ -15,8 +15,8 @@
 // Selection keeps only a running maximum per chunk of 64 spins; afterwards the winning chunk is rescored
 // with the same operations to find the first spin that reaches the maximum.
 // Soft tabu: for the n/4 flips after a spin flips, its score is lowered by 3 temperatures (its rate divided by
-// e^3). It discourages the cheap flip-and-undo cycling a rejection-free chain falls into near a minimum, while an
-// undo worth many temperatures (stepping back down from an expensive climb) still wins. The penalty is applied by
+// e^3). This spreads the flips over more distinct spins, mostly while the anneal is still hot; a flip worth many
+// more temperatures (such as stepping back down from an expensive climb) still wins. The penalty is applied by
 // shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = 3 / (4 beta) at the time of its flip,
 // so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
 //

@@ -51,11 +51,11 @@ selection fused into one pass over memory:
 - Each step reads the noise vector at a random offset, so results do not depend on how the spins are ordered.
 - Selection scores are compared in float32, which can change a pick only when two scores agree to about 7 digits.
 - Soft tabu: for the n/4 flips after a spin flips, its selection weight is divided by e³, as if its ΔE were higher
-  by 3 temperatures (3/β). Near a minimum, a rejection-free chain tends to flip a spin and immediately flip it
-  back, because the cheapest move after a small climb is usually to undo it. The penalty discourages that cycling
-  and pushes the search on to new states, while an undo that is worth much more than 3 temperatures, such as
-  stepping back down from an expensive climb, still happens. It costs nothing per spin: the penalty is applied as
-  a shift of the flipped spin's stored local field.
+  by 3 temperatures (3/β). This spreads the flips over more distinct spins, mostly while the anneal is still hot:
+  on a 1000-spin Sherrington–Kirkpatrick instance, the share of flips that re-flip a spin flipped within the last
+  n/4 flips falls from about 32% to 5% in the first quarter of the anneal and from 58% to 27% in the second. A flip
+  that is worth much more than 3 temperatures, such as stepping back down from an expensive climb, still happens.
+  It costs nothing per spin: the penalty is applied as a shift of the flipped spin's stored local field.
 
 The soft tabu reaches lower energies at the same number of flips, by a wide margin on dense spin glasses. Its best
 `beta_max` is about 2× higher than for the other solvers.
