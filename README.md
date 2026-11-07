@@ -14,13 +14,14 @@ for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes 
 
 ## Results
 
-Against optimized simulated annealing (SA, compared in detail below), with `beta_max` tuned for every run length:
+Against optimized simulated annealing (SA, compared in detail below), with `beta_max` tuned for every run length. A
+PFA flip costs **1.2–1.4×** an accepted SA flip, and a rejected SA proposal about 1/n of one. Counting both, the work
+SA needs to reach PFA's energy:
 
-| what | measured as | result |
-|---|---|---|
-| spin glasses | work for the same energy | SA needs **1.5–2×** PFA's work |
-| constrained problems with large penalties | work for the same energy | SA never gets there: with **15–1000×** PFA's work, it still ends above PFA at 10 flips per spin |
-| cost of a flip | time per executed flip | a PFA flip costs **1.2–1.4×** an accepted SA flip; a rejected SA proposal, about 1/n of one |
+| problems | SA |
+|---|---|
+| spin glasses | needs **1.5–2×** PFA's work |
+| constrained problems with large penalties | never gets there: with **15–1000×** PFA's work, it still ends above PFA at 10 flips per spin |
 
 ## Algorithm
 
