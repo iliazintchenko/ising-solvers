@@ -55,20 +55,17 @@ keeps the chain moving between low-energy states instead of re-flipping the same
 (J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and fixed. The tabu breaks detailed
 balance, which an optimizer doesn't need. It roughly doubles the best `beta_max`.
 
-**Repetitions.** The first of R runs starts from random spins at β = 0. Run k starts from the best state found so
-far, with fresh noise, and β rising from a start that grows with k:
+**Repetitions.** Run 1 of R starts from random spins at β = 0. Run k starts from the best state found so far, with
+fresh noise, and β rising from (k−1)/(R−1)·`beta_max`:
 
 ```
 run 1:  random spins         β: 0                      → beta_max
 run k:  best state so far    β: (k−1)/(R−1)·beta_max   → beta_max
 ```
 
-The runs form an outer anneal. Each restart reheats the best state less than the one before: early ones are hot
-enough to leave its basin and search widely, late ones only refine it, and the last starts at `beta_max`.
-Independent runs throw away what earlier runs found. A bias toward the best state, a field pulling each spin to its
-value there, distorts the dynamics and drags runs back onto it. A restart sets only a run's starting spins and
-starting β; every flip is still chosen by p_j above, with the tabu. The starting βs are
-`beta_max`/(R−1) apart, so with few runs most start too hot or too cold; the schedule pays most with many runs.
+The runs form an outer anneal: each restart reheats the best state less than the one before. Early restarts are hot
+enough to leave its basin and search widely; late ones refine it. The restarts are `beta_max`/(R−1) apart in β, so
+the outer anneal pays most with many runs.
 
 ## Compared with simulated annealing
 
