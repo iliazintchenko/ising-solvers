@@ -232,8 +232,8 @@ x = pfa_native.run_categorical(couplings, fields, groups, beta_max=1.0, num_move
 ```
 
 The problem is in one-hot form, E = ½ xᵀ C x + fᵀ x over x ∈ {0, 1}ⁿ with C = `couplings` and f = `fields`, and
-`groups[i]` the variable that slot i belongs to; couplings within a group are ignored. It returns the lowest-energy x seen, one slot on per group.
-`num_moves` is the number of moves per run; the other parameters are those above, with the tabu acting per variable
-for `tabu_tenure` times the number of variables.
+`groups[i]` the variable that slot i belongs to; couplings within a group are ignored. It returns the lowest-energy x
+seen, one slot on per group. `num_moves` is the number of moves per run; the other parameters are those above, with
+the tabu acting per variable for `tabu_tenure` times the number of variables.
 
 `examples/quickstart.py` solves a small problem and measures flips per second.
