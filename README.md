@@ -55,8 +55,8 @@ keeps the chain moving between low-energy states instead of re-flipping the same
 (J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and fixed. The tabu breaks detailed
 balance, which an optimizer doesn't need. It roughly doubles the best `beta_max`.
 
-**Repetitions.** Run 1 of R starts from random spins at β = 0. Run k starts from the best state found so far, with
-fresh noise, and β rising from (k−1)/(R−1)·`beta_max`:
+**Repetitions.** Run 1 of R starts from random spins at β = 0. Each later run starts from the best state found so
+far, with fresh noise and β starting partway up the ramp:
 
 ```
 run 1:  random spins         β: 0                      → beta_max
