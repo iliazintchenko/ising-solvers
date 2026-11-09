@@ -129,13 +129,6 @@ this advantage.
 temperature, PFA sits lower in energy than SA and still drifts further from where it started. (Equal temperature means
 PFA at β against SA at 2β.)
 
-**Sparse implementations.** The comparison holds on sparse problems as it stands. Written for sparsity, SA updates
-only the flipped spin's d neighbours, and that is all it needs. PFA also has to select without touching all n
-weights, though every change of β moves every one. A sum tree over the rates (the n-fold way) does it with β held
-fixed between rebuilds. A tree of each subtree's minimum ΔE does it exactly at every β: −β·min ΔE bounds every
-score in the subtree, and a top-down search with Gumbel noise drawn on demand (A* sampling) finds the winner.
-Updates cost about d log n per flip; the search, about √n nodes in a prototype. That version is not compared here.
-
 ## Implementation
 
 The annealer runs in compiled C with SIMD, on one core, on any couplings and fields. Every flip reads one full
