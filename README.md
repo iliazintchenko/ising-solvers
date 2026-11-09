@@ -69,8 +69,8 @@ enough to leave its basin and search widely; late ones refine it. The restarts a
 the outer anneal pays most with many runs.
 
 **Categorical variables.** Often a variable takes exactly one of several values, written as a one-hot group of
-spins. `run_categorical` takes the groups and changes one whole variable per step: variable r moves from its value
-a_r to value k, chosen among all variables and values with
+spins. Given the groups, each step changes one whole variable: variable r moves from its value a_r to value k,
+chosen among all variables and values with
 
 ```
 p(r→k) ∝ e^(−β ΔE(r→k)),    ΔE(r→k) = F(k) − F(a_r)
@@ -79,8 +79,7 @@ p(r→k) ∝ e^(−β ΔE(r→k)),    ΔE(r→k) = F(k) − F(a_r)
 where F(k) is the energy of value k given every other variable's current value. No state ever breaks a group, so
 there is no penalty to set and no climb over one. Each variable keeps its first value as a reference and stores the
 others relative to it: a move reads the coupling row of the value it leaves and of the value it enters, none for the
-reference. With two values per variable that is one stored value and one row per move: the spin problem, solved by
-`run`.
+reference. With two values per variable that is one stored value and one row per move: exactly the spin problem.
 
 ## Compared with simulated annealing
 
@@ -218,22 +217,12 @@ It returns the lowest-energy state seen, as ±1 spins (int8).
 |---|---|---|---|
 | `couplings` | J, an n × n symmetric matrix with zero diagonal | required | Read in place when it is a C-contiguous float64 array, otherwise copied once. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
+| `groups` | for categorical problems, the variable of each slot | `None` | Makes the problem categorical (see Categorical variables): `couplings` and `fields` are then the one-hot form ½ xᵀ C x + fᵀ x over x ∈ {0, 1}ⁿ, couplings within a group are ignored, each step changes one variable's value, and the result is the one-hot x. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
-| `num_flips` | flips per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
+| `num_flips` | steps per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
 | `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
-| `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. Rarely worth changing. |
-
-For categorical variables:
-
-```python
-x = pfa_native.run_categorical(couplings, fields, groups, beta_max=1.0, num_moves=1000, num_reps=10)
-```
-
-The problem is in one-hot form, E = ½ xᵀ C x + fᵀ x over x ∈ {0, 1}ⁿ with C = `couplings` and f = `fields`, and
-`groups[i]` the variable that slot i belongs to; couplings within a group are ignored. It returns the lowest-energy x
-seen, one slot on per group. `num_moves` is the number of moves per run; the other parameters are those above, with
-the tabu acting per variable for `tabu_tenure` times the number of variables.
+| `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `groups`, the tabu acts per variable, and n is the number of variables. Rarely worth changing. |
 
 `examples/quickstart.py` solves a small problem and measures flips per second.

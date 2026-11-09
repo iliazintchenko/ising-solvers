@@ -63,6 +63,7 @@ def simd_path() -> str:
 def run(
     couplings: np.ndarray,
     fields: np.ndarray | None = None,
+    groups: np.ndarray | None = None,
     beta_max: float = 1.0,
     num_flips: int = 1000,
     num_reps: int = 1,
@@ -84,11 +85,21 @@ def run(
     memory. The couplings are read in place, without a copy, when they are a
     C-contiguous float64 array.
 
+    With groups, the problem is categorical: each variable takes exactly one of
+    several values. It is given in one-hot form, energy 0.5 * x @ couplings @ x
+    + fields @ x over binary x, with groups[i] the variable that slot i belongs
+    to; couplings within a group are ignored. Every step then changes one
+    variable's value, chosen among all variables and values by the same rule,
+    so no state breaks the one-value-per-variable constraint and no penalty is
+    needed. The tabu acts per variable, for tabu_tenure times the number of
+    variables steps.
+
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
         fields (np.ndarray, optional): External field terms. Defaults to None.
+        groups (np.ndarray, optional): For categorical problems, the variable of each one-hot slot. Defaults to None.
         beta_max (float): The maximum inverse temperature. Defaults to 1.0.
-        num_flips (int): The number of spin flips to perform per repetition. Defaults to 1000.
+        num_flips (int): Steps per repetition, each flipping a spin or changing one variable's value. Defaults to 1000.
         num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far. Defaults to 1.
         seed (int): Seed for the random number generator
         tabu_lambda (float): Tabu penalty on a just-flipped spin, in temperatures. Defaults to 3.0;
@@ -96,7 +107,7 @@ def run(
         tabu_tenure (float): How long a spin stays tabu, as a fraction of n flips; 0 turns the tabu
             off. Defaults to 0.25; rarely worth changing.
     Returns:
-        np.ndarray: The configuration of spins that minimizes the energy over all repetitions.
+        np.ndarray: The lowest-energy state over all repetitions: +-1 spins, or with groups the one-hot x (0/1).
     Raises:
         ValueError: If input parameters are invalid.
     """
@@ -113,6 +124,8 @@ def run(
         raise ValueError("tabu_lambda must be non-negative")
     if not 0.0 <= tabu_tenure <= 1.0:
         raise ValueError("tabu_tenure must be between 0 and 1")
+    if groups is not None:
+        return _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
 
     couplings = np.ascontiguousarray(couplings, dtype=np.float64)
     n = len(couplings)
@@ -169,46 +182,8 @@ def run(
     return spins_best.astype(np.int8)
 
 
-def run_categorical(
-    couplings: np.ndarray,
-    fields: np.ndarray | None,
-    groups: np.ndarray,
-    beta_max: float = 1.0,
-    num_moves: int = 1000,
-    num_reps: int = 1,
-    seed: int = 42,
-    tabu_lambda: float = 3.0,
-    tabu_tenure: float = 0.25,
-) -> np.ndarray:
-    """
-    PFA on categorical variables: each variable takes exactly one of several
-    values. The problem is given in one-hot form, energy 0.5 * x @ couplings @ x
-    + fields @ x over binary x, with groups[i] the variable that slot i belongs
-    to; a valid x has exactly one slot on per group, and couplings within a
-    group are ignored. Every move changes one variable's value, chosen among
-    all variables and values by Gumbel-max with probability proportional to
-    exp(-beta * dE), so no state ever breaks the one-value-per-variable rule
-    and no penalty is needed. Values are stored relative to each variable's
-    first value; with two values per variable this is the spin problem, and
-    run() solves it. The schedule, repetitions and tabu (per variable, tenure
-    tabu_tenure * number of variables) are as in run().
-
-    Returns:
-        np.ndarray: The one-hot state (int8, 0/1 per slot) with the lowest energy over all repetitions.
-    """
-
-    validate_hamiltonian(couplings, fields)
-    if beta_max <= 0.0:
-        raise ValueError("beta_max must be positive")
-    if num_moves <= 1:
-        raise ValueError("num_moves must be at least 2")
-    if num_reps <= 0:
-        raise ValueError("num_reps must be positive")
-    if tabu_lambda < 0.0:
-        raise ValueError("tabu_lambda must be non-negative")
-    if not 0.0 <= tabu_tenure <= 1.0:
-        raise ValueError("tabu_tenure must be between 0 and 1")
-
+def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+    """run() for categorical problems; values are stored relative to each variable's first value."""
     couplings = np.asarray(couplings, dtype=np.float64)
     n = len(couplings)
     fields = np.zeros(n) if fields is None else np.asarray(fields, dtype=np.float64)
@@ -241,7 +216,7 @@ def run_categorical(
 
     if np.all(gs[1:] - gs[:-1] == 1):   # two values per variable: the spin problem, slot on = spin +1
         J, h, _ = binary_to_ising(Jt, ut, e0)
-        spins = run(J, h, beta_max=beta_max, num_flips=num_moves, num_reps=num_reps, seed=seed,
+        spins = run(J, h, beta_max=beta_max, num_flips=num_flips, num_reps=num_reps, seed=seed,
                     tabu_lambda=tabu_lambda, tabu_tenure=tabu_tenure)
         return one_hot(np.where(spins > 0, np.arange(V), -1))
 
@@ -266,7 +241,7 @@ def run_categorical(
         energy_c = ctypes.c_double(energy)
         energy_min_c = ctypes.c_double(energy)
         _lib.pfa_categorical_anneal(
-            Jt, F, m, V, gs, sgrp, cur, noise_buffer, num_moves, beta_start, beta_max,
+            Jt, F, m, V, gs, sgrp, cur, noise_buffer, num_flips, beta_start, beta_max,
             ctypes.byref(energy_c), ctypes.byref(energy_min_c), best_cur, offsets_seed, tabu_lambda, tenure,
         )
         if energy_min_c.value < energy_best:
