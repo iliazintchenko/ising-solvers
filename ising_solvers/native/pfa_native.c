@@ -198,3 +198,29 @@ void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int
     *E_io = E; *best_io = best;
     free(pen); free(last); free(recent);
 }
+
+// One-hot input -> reference-value layout, in one pass. C: n x n couplings over all slots, f: n fields; ref[r]: the
+// reference slot of variable r; slots[i], sgrp[i]: the i-th other slot and its variable (m of them, grouped by
+// variable). Writes Jt (m x m, zero within a variable), ut (m) and returns the energy of the all-reference state.
+double pfa_categorical_prepare(const double *C, const double *f, int n, int V, const int *ref, int m, const int *slots,
+                               const int *sgrp, double *Jt, double *ut) {
+    double e0 = 0.0;
+    for (int r = 0; r < V; r++) {
+        const double *row = C + (long)ref[r] * n; double s = 0.0;
+        for (int q = 0; q < V; q++) if (q != r) s += row[ref[q]];
+        e0 += f[ref[r]] + 0.5 * s;
+    }
+    for (int i = 0; i < m; i++) {
+        int gi = sgrp[i];
+        const double *ra = C + (long)slots[i] * n, *rr = C + (long)ref[gi] * n;
+        double *out = Jt + (long)i * m;
+        for (int j = 0; j < m; j++) {
+            int gj = sgrp[j], b = slots[j], rb = ref[gj];
+            out[j] = gj == gi ? 0.0 : (ra[b] + rr[rb]) - (ra[rb] + rr[b]);   // same rounding for (i, j) and (j, i)
+        }
+        double s = f[slots[i]] - f[ref[gi]];
+        for (int q = 0; q < V; q++) if (q != gi) s += ra[ref[q]] - rr[ref[q]];
+        ut[i] = s;
+    }
+    return e0;
+}

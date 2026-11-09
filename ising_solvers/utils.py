@@ -40,6 +40,12 @@ def get_energy(
     return energy
 
 
+def is_symmetric(matrix: np.ndarray) -> bool:
+    """Exact symmetry, comparing the upper strip with the lower strip a block at a time (cache-friendly)."""
+    n = len(matrix)
+    return all(np.array_equal(matrix[i : i + 256, i:], matrix[i:, i : i + 256].T) for i in range(0, n, 256))
+
+
 def validate_hamiltonian(
     couplings: np.ndarray, fields: np.ndarray | None = None
 ) -> None:
@@ -65,7 +71,7 @@ def validate_hamiltonian(
         raise ValueError("Fields must have the same length as couplings matrix")
     if not np.allclose(np.diag(couplings), 0.0):
         raise ValueError("Couplings diagonal must be zero")
-    if not np.array_equal(couplings, couplings.T):
+    if not is_symmetric(couplings):
         raise ValueError("Couplings must be symmetric matrix")
 
 

@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from .utils import binary_to_ising, get_energy, validate_hamiltonian
+from .utils import get_energy, is_symmetric, validate_hamiltonian
 
 # built by running `make` in the repository root
 _LIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "native", "libpfa_native.so")
@@ -51,6 +51,19 @@ _lib.pfa_categorical_anneal.argtypes = [
     ctypes.c_int,  # tabu tenure, in moves
 ]
 _lib.pfa_categorical_anneal.restype = None
+_lib.pfa_categorical_prepare.argtypes = [
+    _f64_2d,  # one-hot couplings over all slots
+    _f64,  # one-hot fields
+    ctypes.c_int,  # number of slots
+    ctypes.c_int,  # number of variables
+    _i32,  # reference slot of each variable
+    ctypes.c_int,  # number of other slots
+    _i32,  # the other slots, grouped by variable
+    _i32,  # variable of each other slot
+    _f64_2d,  # pair terms relative to the reference values (out)
+    _f64,  # fields relative to the reference values (out)
+]
+_lib.pfa_categorical_prepare.restype = ctypes.c_double
 _lib.pfa_native_simd_path.argtypes = []
 _lib.pfa_native_simd_path.restype = ctypes.c_char_p
 
@@ -112,7 +125,10 @@ def run(
         ValueError: If input parameters are invalid.
     """
 
-    validate_hamiltonian(couplings, fields)
+    if groups is None:
+        validate_hamiltonian(couplings, fields)
+    elif couplings.shape[0] != couplings.shape[1] or (fields is not None and len(fields) != len(couplings)):
+        raise ValueError("Couplings must be a square matrix and fields of the same length")
 
     if beta_max <= 0.0:
         raise ValueError("beta_max must be positive")
@@ -126,7 +142,11 @@ def run(
         raise ValueError("tabu_tenure must be between 0 and 1")
     if groups is not None:
         return _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
+    return _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
 
+
+def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+    """run() for spins, on validated input."""
     couplings = np.ascontiguousarray(couplings, dtype=np.float64)
     n = len(couplings)
     fields = np.zeros(n) if fields is None else np.asarray(fields, dtype=np.float64)
@@ -191,41 +211,42 @@ def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, s
     if len(gid) != n:
         raise ValueError("groups must give one variable per slot")
     V = int(gid.max()) + 1
-    members = [np.where(gid == r)[0] for r in range(V)]
-    ref = np.array([mem[0] for mem in members])                       # each variable's reference value
-    slots = np.concatenate([mem[1:] for mem in members]).astype(np.intp)  # the other values, grouped by variable
-    sgrp = np.concatenate([np.full(len(mem) - 1, r) for r, mem in enumerate(members)]).astype(np.int32)
-    gs = np.concatenate(([0], np.cumsum([len(mem) - 1 for mem in members]))).astype(np.int32)
+    order = np.argsort(gid, kind="stable")                            # slots grouped by variable, in input order
+    sizes = np.bincount(gid, minlength=V)
+    starts = np.concatenate(([0], np.cumsum(sizes)[:-1]))
+    ref = order[starts]                                               # each variable's reference value: its first slot
+    is_ref = np.zeros(n, dtype=bool)
+    is_ref[starts] = True
+    slots = order[~is_ref]                                            # the other values, grouped by variable
+    sgrp = gid[slots].astype(np.int32)
+    gs = np.concatenate(([0], np.cumsum(sizes - 1))).astype(np.int32)
     m = len(slots)
 
-    # pair terms and fields relative to the reference values; same-variable pairs never both occur
-    C = couplings.copy()
-    C[gid[:, None] == gid[None, :]] = 0.0
-    rs = ref[sgrp]
-    Jt = C[np.ix_(slots, slots)] - C[np.ix_(slots, rs)] - C[np.ix_(rs, slots)] + C[np.ix_(rs, rs)]
-    Jt[sgrp[:, None] == sgrp[None, :]] = 0.0
-    Jt = np.ascontiguousarray(Jt)
-    ut = fields[slots] - fields[rs] + C[np.ix_(slots, ref)].sum(axis=1) - C[np.ix_(rs, ref)].sum(axis=1)
-    e0 = float(fields[ref].sum() + 0.5 * C[np.ix_(ref, ref)].sum())
+    # pair terms and fields relative to the reference values, one pass over the input in C
+    Jt = np.empty((m, m))
+    ut = np.empty(m)
+    e0 = _lib.pfa_categorical_prepare(np.ascontiguousarray(couplings), np.ascontiguousarray(fields), n, V,
+                                      ref.astype(np.int32), m, slots.astype(np.int32), sgrp, Jt, ut)
+    if not is_symmetric(Jt):
+        raise ValueError("Couplings between different variables must be symmetric")
 
     def one_hot(cur):
         x = np.zeros(n, dtype=np.int8)
-        for r in range(V):
-            x[ref[r] if cur[r] < 0 else slots[cur[r]]] = 1
+        x[np.where(cur < 0, ref, slots[np.maximum(cur, 0)])] = 1
         return x
 
-    if np.all(gs[1:] - gs[:-1] == 1):   # two values per variable: the spin problem, slot on = spin +1
-        J, h, _ = binary_to_ising(Jt, ut, e0)
-        spins = run(J, h, beta_max=beta_max, num_flips=num_flips, num_reps=num_reps, seed=seed,
-                    tabu_lambda=tabu_lambda, tabu_tenure=tabu_tenure)
-        return one_hot(np.where(spins > 0, np.arange(V), -1))
+    if np.all(sizes == 2):   # two values per variable: the spin problem, x = (s + 1) / 2 with s = +1 for the other slot
+        h = 0.5 * ut + 0.25 * Jt.sum(axis=1)
+        Jt *= 0.25
+        spins = _run_spins(Jt, h, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
+        return one_hot(np.where(spins > 0, np.arange(V), -1).astype(np.int32))
 
     rng = np.random.default_rng(seed)
     tenure = int(tabu_tenure * V)
     energy_best, cur_best = np.inf, None
     for rep in range(num_reps):
         if rep == 0:
-            v = np.array([rng.integers(0, len(mem)) for mem in members])
+            v = (rng.random(V) * sizes).astype(np.int64)                 # a uniformly random value per variable
             cur = np.where(v == 0, -1, gs[:-1] + v - 1).astype(np.int32)
             beta_start = 0.0
         else:
