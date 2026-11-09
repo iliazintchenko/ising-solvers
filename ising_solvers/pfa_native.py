@@ -26,6 +26,8 @@ _lib.pfa_native_anneal.argtypes = [
     ctypes.POINTER(ctypes.c_double),  # lowest energy (in: initial, out: lowest seen)
     _f32,  # spins of the lowest energy state (out)
     ctypes.c_uint64,  # seed for the per-step noise offsets
+    ctypes.c_double,  # tabu penalty lambda, in temperatures
+    ctypes.c_int,  # tabu tenure, in flips
 ]
 _lib.pfa_native_anneal.restype = None
 _lib.pfa_native_simd_path.argtypes = []
@@ -44,19 +46,22 @@ def run(
     num_flips: int = 1000,
     num_reps: int = 1,
     seed: int = 42,
+    tabu_lambda: float = 3.0,
+    tabu_tenure: float = 0.25,
 ) -> np.ndarray:
     """
     Attempts to find the ground state of an Ising problem with PFA, a
     rejection-free annealer (see the README): every step flips one spin,
     chosen with probability proportional to exp(-beta * dE) by Gumbel-max
-    sampling, while beta rises linearly from 0 to beta_max. For the n/4 flips
-    after a spin flips, its dE is raised by 3 temperatures at the time of its
-    flip (a tabu). The first repetition starts from random spins; repetition
-    k restarts from the best state found so far, with beta ramping up from
-    (k - 1) / (num_reps - 1) * beta_max, so the restarts cool. Compiled
-    to native SIMD code on one core: each flip updates the local fields and
-    selects the next spin in one pass over memory. The couplings are read in
-    place, without a copy, when they are a C-contiguous float64 array.
+    sampling, while beta rises linearly to beta_max. For the tabu_tenure * n
+    flips after a spin flips, its dE is raised by tabu_lambda temperatures at
+    the time of its flip (a tabu). The first repetition starts from random
+    spins at beta = 0; repetition k restarts from the best state found so
+    far, with beta ramping up from (k - 1) / (num_reps - 1) * beta_max, so
+    the restarts cool. Compiled to native SIMD code on one core: each flip
+    updates the local fields and selects the next spin in one pass over
+    memory. The couplings are read in place, without a copy, when they are a
+    C-contiguous float64 array.
 
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
@@ -65,6 +70,10 @@ def run(
         num_flips (int): The number of spin flips to perform per repetition. Defaults to 1000.
         num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far. Defaults to 1.
         seed (int): Seed for the random number generator
+        tabu_lambda (float): Tabu penalty on a just-flipped spin, in temperatures. Defaults to 3.0;
+            rarely worth changing.
+        tabu_tenure (float): How long a spin stays tabu, as a fraction of n flips; 0 turns the tabu
+            off. Defaults to 0.25; rarely worth changing.
     Returns:
         np.ndarray: The configuration of spins that minimizes the energy over all repetitions.
     Raises:
@@ -79,10 +88,15 @@ def run(
         raise ValueError("num_flips must be at least 2")
     if num_reps <= 0:
         raise ValueError("num_reps must be positive")
+    if tabu_lambda < 0.0:
+        raise ValueError("tabu_lambda must be non-negative")
+    if not 0.0 <= tabu_tenure <= 1.0:
+        raise ValueError("tabu_tenure must be between 0 and 1")
 
     couplings = np.ascontiguousarray(couplings, dtype=np.float64)
     n = len(couplings)
     fields = np.zeros(n) if fields is None else np.asarray(fields, dtype=np.float64)
+    tenure = int(tabu_tenure * n)
 
     rng = np.random.default_rng(seed)
 
@@ -123,6 +137,8 @@ def run(
             ctypes.byref(energy_min_c),
             spins_min,
             offsets_seed,
+            tabu_lambda,
+            tenure,
         )
 
         if energy_min_c.value < energy_best:

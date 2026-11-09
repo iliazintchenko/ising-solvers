@@ -14,11 +14,12 @@
 // through the spin indices, which ties results to how the spins happen to be ordered.
 // Selection keeps only a running maximum per chunk of 64 spins; afterwards the winning chunk is rescored
 // with the same operations to find the first spin that reaches the maximum.
-// Tabu: for the n/4 flips after a spin flips, its dE is raised by 3 temperatures at the time of its flip
-// (3 / beta_i): its rate is divided by e^3 right after the flip and by more as the anneal cools. This spreads the flips over more distinct spins, mostly while the anneal is still hot; a flip worth many
-// more temperatures (such as stepping back down from an expensive climb) still wins. The penalty is applied by
-// shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = 3 / (4 beta) at the time of its flip,
-// so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
+// Tabu: for the tenure flips after a spin flips (default n/4), its dE is raised by lambda temperatures at the time
+// of its flip (lambda / beta_i, default lambda = 3): its rate is divided by e^lambda right after the flip and by
+// more as the anneal cools. This spreads the flips over more distinct spins, mostly while the anneal is still hot;
+// a flip worth many more temperatures (such as stepping back down from an expensive climb) still wins. The penalty
+// is applied by shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = lambda / (4 beta) at the
+// time of its flip, so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
 //
 // This file holds the anneal loop and picks the SIMD path at compile time from the target flags (see the
 // Makefile). Each path lives in its own file and defines one function, flip_pass(), which does the pass:
@@ -99,12 +100,12 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 
 const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 
-#define TABU_LAMBDA 3.0   // tabu penalty, in temperatures; the tabu list holds the last n/4 flips
 // pen[j]: the shift c_j currently applied to phi[j] (0 when j is not tabu); last[j]: step of j's last flip;
 // recent[t % tenure]: the spin flipped at step t.
 ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, const float *noise, int n, long nflips,
                                     double beta_start, double beta_max, int bi, double *E_io, double *best_io,
-                                    float *sbest, uint64_t seed, int tenure, double *pen, long *last, int *recent) {
+                                    float *sbest, uint64_t seed, double lambda, int tenure, double *pen, long *last,
+                                    int *recent) {
     double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nflips - 1);
     uint64_t x = seed | 1;   // xorshift64* generator for the offsets
     for (long t = 0; t < nflips; t++) {
@@ -118,7 +119,7 @@ ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, cons
                 int j = recent[t % tenure];
                 if (last[j] == t - tenure) { phi[j] += (double)s[j] * pen[j]; pen[j] = 0.0; }
             }
-            pen[i] = TABU_LAMBDA * 0.25 / beta; phi[i] -= (double)s[i] * pen[i];
+            pen[i] = lambda * 0.25 / beta; phi[i] -= (double)s[i] * pen[i];
             recent[t % tenure] = i; last[i] = t;
         }
         if (E < best) { best = E; __builtin_memcpy(sbest, s, sizeof(float) * n); }
@@ -132,16 +133,16 @@ ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, cons
 
 // J: the n x n couplings, row-major; phi: n local fields / 2 (updated in place); s: n spins as float32 +-1
 // (updated in place); noise: the noise vector stored twice (2n floats); sbest: n floats (out).
-// beta rises linearly from beta_start to beta_max; seed: for the random noise offsets.
+// beta rises linearly from beta_start to beta_max; seed: for the random noise offsets; tabu: penalty lambda in
+// temperatures for the last tenure flips (tenure 0: no tabu).
 void pfa_native_anneal(const double *J, double *phi, float *s, const float *noise, int n,
                        long nflips, double beta_start, double beta_max, int bi, double *E_io, double *best_io,
-                       float *sbest, uint64_t seed) {
-    int tenure = n / 4;
+                       float *sbest, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(n, sizeof(double));
     long *last = malloc(sizeof(long) * n);
     int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
     for (int j = 0; j < n; j++) last[j] = -1;
-    anneal_loop(J, phi, s, noise, n, nflips, beta_start, beta_max, bi, E_io, best_io, sbest, seed, tenure, pen, last,
-                recent);
+    anneal_loop(J, phi, s, noise, n, nflips, beta_start, beta_max, bi, E_io, best_io, sbest, seed, lambda, tenure, pen,
+                last, recent);
     free(pen); free(last); free(recent);
 }

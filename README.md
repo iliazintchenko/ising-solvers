@@ -52,8 +52,9 @@ similar cost, the chain picks spins it hasn't just flipped. Hot, this spreads th
 keeps the chain moving between low-energy states instead of re-flipping the same few spins.
 
 λ is in temperatures and the tenure a fraction of n, so the rule is unchanged when the energy is rescaled
-(J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and fixed. The tabu breaks detailed
-balance, which an optimizer doesn't need. It roughly doubles the best `beta_max`.
+(J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and set by `tabu_lambda` and
+`tabu_tenure`. The tabu breaks detailed balance, which an optimizer doesn't need. It roughly doubles the best
+`beta_max`.
 
 **Repetitions.** Run 1 of R starts from random spins at β = 0. Each later run starts from the best state found so
 far, with fresh noise and β starting partway up the ramp:
@@ -205,5 +206,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8).
 | `num_flips` | flips per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
 | `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, so results are reproducible. |
+| `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
+| `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. Rarely worth changing. |
 
 `examples/quickstart.py` solves a small problem and measures flips per second.
