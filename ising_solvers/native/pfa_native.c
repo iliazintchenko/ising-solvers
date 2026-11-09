@@ -103,9 +103,9 @@ const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 // pen[j]: the shift c_j currently applied to phi[j] (0 when j is not tabu); last[j]: step of j's last flip;
 // recent[t % tenure]: the spin flipped at step t.
 ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, const float *noise, int n, long nflips,
-                                    double beta_max, int bi, double *E_io, double *best_io, float *sbest, uint64_t seed,
-                                    int tenure, double *pen, long *last, int *recent) {
-    double E = *E_io, best = *best_io, beta = 0.0, dbeta = beta_max / (double)(nflips - 1);
+                                    double beta_start, double beta_max, int bi, double *E_io, double *best_io,
+                                    float *sbest, uint64_t seed, int tenure, double *pen, long *last, int *recent) {
+    double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nflips - 1);
     uint64_t x = seed | 1;   // xorshift64* generator for the offsets
     for (long t = 0; t < nflips; t++) {
         int i = bi; double si = (double)s[i];
@@ -132,15 +132,16 @@ ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, cons
 
 // J: the n x n couplings, row-major; phi: n local fields / 2 (updated in place); s: n spins as float32 +-1
 // (updated in place); noise: the noise vector stored twice (2n floats); sbest: n floats (out).
-// seed: for the random noise offsets.
+// beta rises linearly from beta_start to beta_max; seed: for the random noise offsets.
 void pfa_native_anneal(const double *J, double *phi, float *s, const float *noise, int n,
-                       long nflips, double beta_max, int bi, double *E_io, double *best_io, float *sbest,
-                       uint64_t seed) {
+                       long nflips, double beta_start, double beta_max, int bi, double *E_io, double *best_io,
+                       float *sbest, uint64_t seed) {
     int tenure = n / 4;
     double *pen = calloc(n, sizeof(double));
     long *last = malloc(sizeof(long) * n);
     int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
     for (int j = 0; j < n; j++) last[j] = -1;
-    anneal_loop(J, phi, s, noise, n, nflips, beta_max, bi, E_io, best_io, sbest, seed, tenure, pen, last, recent);
+    anneal_loop(J, phi, s, noise, n, nflips, beta_start, beta_max, bi, E_io, best_io, sbest, seed, tenure, pen, last,
+                recent);
     free(pen); free(last); free(recent);
 }

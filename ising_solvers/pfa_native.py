@@ -19,6 +19,7 @@ _lib.pfa_native_anneal.argtypes = [
     _f32,  # noise buffer, the noise vector stored twice
     ctypes.c_int,  # number of spins
     ctypes.c_long,  # number of flips
+    ctypes.c_double,  # beta at the start of the ramp
     ctypes.c_double,  # beta_max
     ctypes.c_int,  # index of the first spin to flip
     ctypes.POINTER(ctypes.c_double),  # energy (in: initial, out: final)
@@ -29,6 +30,9 @@ _lib.pfa_native_anneal.argtypes = [
 _lib.pfa_native_anneal.restype = None
 _lib.pfa_native_simd_path.argtypes = []
 _lib.pfa_native_simd_path.restype = ctypes.c_char_p
+
+# repetitions after the first restart from the best state found so far, with beta ramping up from this fraction of beta_max
+RESTART_BETA = 0.3
 
 
 def simd_path() -> str:
@@ -50,7 +54,9 @@ def run(
     chosen with probability proportional to exp(-beta * dE) by Gumbel-max
     sampling, while beta rises linearly from 0 to beta_max. For the n/4 flips
     after a spin flips, its dE is raised by 3 temperatures at the time of its
-    flip (a tabu). Compiled
+    flip (a tabu). The first repetition starts from random spins; each
+    further one restarts from the best state found so far, with beta ramping
+    up from 0.3 * beta_max. Compiled
     to native SIMD code on one core: each flip updates the local fields and
     selects the next spin in one pass over memory. The couplings are read in
     place, without a copy, when they are a C-contiguous float64 array.
@@ -60,7 +66,7 @@ def run(
         fields (np.ndarray, optional): External field terms. Defaults to None.
         beta_max (float): The maximum inverse temperature. Defaults to 1.0.
         num_flips (int): The number of spin flips to perform per repetition. Defaults to 1000.
-        num_reps (int): Number of repetitions to perform, each starting from a different random configuration. Defaults to 1.
+        num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far. Defaults to 1.
         seed (int): Seed for the random number generator
     Returns:
         np.ndarray: The configuration of spins that minimizes the energy over all repetitions.
@@ -86,16 +92,21 @@ def run(
     energy_best = np.inf
     spins_best = None
 
-    for _ in range(num_reps):
-        spins = 2.0 * rng.integers(0, 2, n).astype(np.float64) - 1.0
+    for rep in range(num_reps):
+        if rep == 0:
+            spins = 2.0 * rng.integers(0, 2, n).astype(np.float64) - 1.0
+            beta_start = 0.0
+        else:
+            spins = spins_best.astype(np.float64)
+            beta_start = RESTART_BETA * beta_max
         energy = get_energy(spins, couplings, fields)
         noise_vec = -np.log(-np.log(rng.random(n)))
         noise_buffer = np.concatenate((noise_vec, noise_vec)).astype(np.float32)
         offsets_seed = int(rng.integers(1, 2**63))
         half_fields = 0.5 * (fields + couplings @ spins)
 
-        # first pick at beta = 0: the largest noise
-        first = int(np.argmax(noise_vec))
+        # first pick at beta_start: argmax_j(-beta_start * dE_j + noise_j), with dE_j = -4 s_j phi_j
+        first = int(np.argmax(4.0 * beta_start * spins * half_fields + noise_vec))
 
         spins_f32 = spins.astype(np.float32)
         spins_min = spins_f32.copy()
@@ -108,6 +119,7 @@ def run(
             noise_buffer,
             n,
             num_flips,
+            beta_start,
             beta_max,
             first,
             ctypes.byref(energy_c),
