@@ -67,7 +67,7 @@ The runs form an outer anneal. Each restart reheats the best state less than the
 enough to leave its basin and search widely, late ones only refine it, and the last starts at `beta_max`.
 Independent runs throw away what earlier runs found. A bias toward the best state, a field pulling each spin to its
 value there, distorts the dynamics and drags runs back onto it. A restart sets only a run's starting spins and
-starting β; every flip is still chosen by the same rule, and nothing needs tuning. The starting βs are
+starting β; every flip is still chosen by p_j above, with the tabu, and nothing needs tuning. The starting βs are
 `beta_max`/(R−1) apart, so with few runs most start too hot or too cold; the schedule pays most with many runs.
 
 ## Compared with simulated annealing
