@@ -68,18 +68,18 @@ The runs form an outer anneal: each restart reheats the best state less than the
 enough to leave its basin and search widely; late ones refine it. The restarts are `beta_max`/(R−1) apart in β, so
 the outer anneal pays most with many runs.
 
-**Categorical variables.** Often a variable takes exactly one of several values, written as a one-hot group of
-spins. Given the groups, each step changes one whole variable: variable r moves from its value a_r to value k,
-chosen among all variables and values with
+**Categorical variables.** Often a variable takes exactly one of several values. Written as spins, that is a one-hot
+group, which every single flip breaks. Given the number of values of each variable, each step instead changes one
+whole variable: variable r moves from its value a_r to value k, chosen among all variables and values with
 
 ```
 p(r→k) ∝ e^(−β ΔE(r→k)),    ΔE(r→k) = F(k) − F(a_r)
 ```
 
-where F(k) is the energy of value k given every other variable's current value. No state ever breaks a group, so
-there is no penalty to set and no climb over one. Each variable keeps its first value as a reference and stores the
-others relative to it: a move reads the coupling row of the value it leaves and of the value it enters, none for the
-reference. With two values per variable that is one stored value and one row per move: exactly the spin problem.
+where F(k) is the energy of value k given every other variable's current value. Every state has one value per
+variable, so there is no penalty to set and no climb over one. Value 0 of each variable adds nothing; every other value
+has its own row of couplings, so a move reads the row of the value it leaves and of the value it enters, none for value
+0. With two values per variable that is one stored value and one row per move: exactly the spin problem.
 
 ## Compared with simulated annealing
 
@@ -187,9 +187,9 @@ A flip therefore costs the same on every problem of a given size. The tricks:
 - **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when E
   reaches a new low.
 - **Categorical moves.** One pass per move, as for spins. Each stored value F(k) is updated with the rows of the
-  value left and the value entered (zeros for the reference) and scored F(a_r) − F(k) − c_r + g_k/β in float64,
+  value left and the value entered (zeros for value 0) and scored F(a_r) − F(k) − c_r + g_k/β in float64,
   where c_r is the tabu of its variable r. The term F(a_r) − c_r is computed once per variable before the pass, along
-  with the moves back to each reference. A variable's current value is kept at +∞ during the pass, so it scores −∞
+  with the moves back to value 0. A variable's current value is kept at +∞ during the pass, so it scores −∞
   without a branch.
 
 ## Usage
@@ -212,20 +212,25 @@ target. Then:
 from ising_solvers import pfa_native
 
 spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
+values = pfa_native.run(couplings, fields, sizes=sizes, num_flips=100 * len(sizes), num_reps=10)
 ```
 
-It returns the lowest-energy state seen, as ±1 spins (int8).
+It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as the value of each variable (int64).
 
 | parameter | what it is | default | theory |
 |---|---|---|---|
 | `couplings` | J, an n × n symmetric matrix with zero diagonal | required | Read in place when it is a C-contiguous float64 array, otherwise copied once. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
-| `groups` | for categorical problems, the variable of each slot | `None` | Makes the problem categorical (see Categorical variables): `couplings` and `fields` are then the one-hot form ½ xᵀ C x + fᵀ x over x ∈ {0, 1}ⁿ, couplings within a group are ignored, each step changes one variable's value, and the result is the one-hot x. |
+| `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
 | `num_flips` | steps per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
 | `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
-| `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `groups`, the tabu acts per variable, and n is the number of variables. Rarely worth changing. |
+| `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `sizes`, the tabu acts per variable, and n is the number of variables. Rarely worth changing. |
+
+A categorical problem in one-hot form, ½ xᵀ C x + fᵀ x over binary x with one 1 per group, converts with
+`pfa_native.categorical_from_one_hot(couplings, fields, groups)`, which returns the couplings, fields, sizes and the
+energy offset between the two forms; `pfa_native.categorical_to_one_hot(values, groups)` converts a result back.
 
 `examples/quickstart.py` solves a small problem and measures flips per second.

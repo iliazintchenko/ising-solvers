@@ -32,19 +32,19 @@ _lib.pfa_native_anneal.argtypes = [
 ]
 _lib.pfa_native_anneal.restype = None
 _lib.pfa_categorical_anneal.argtypes = [
-    _f64_2d,  # pair terms between value slots, relative to each variable's reference value
-    _f64,  # fields of the value slots, relative to the reference (updated in place)
-    ctypes.c_int,  # number of value slots
+    _f64_2d,  # couplings between the values other than 0
+    _f64,  # fields of those values, plus their couplings to the current values (updated in place)
+    ctypes.c_int,  # number of values other than 0
     ctypes.c_int,  # number of variables with more than one value
-    _i32,  # variable of each slot, 0 .. V - 1, slots grouped by variable
-    _i32,  # current slot of each variable, -1 at the reference value (updated in place)
+    _i32,  # variable of each value other than 0, 0 .. V - 1, grouped by variable
+    _i32,  # current value of each variable as its row, -1 at value 0 (updated in place)
     _f32,  # noise buffer, the noise vector stored twice
     ctypes.c_long,  # number of moves
     ctypes.c_double,  # beta at the start of the ramp
     ctypes.c_double,  # beta_max
     ctypes.POINTER(ctypes.c_double),  # energy (in: initial, out: final)
     ctypes.POINTER(ctypes.c_double),  # lowest energy (in: initial, out: lowest seen)
-    _i32,  # slots of the lowest energy state (out)
+    _i32,  # rows of the lowest energy state (out)
     ctypes.c_uint64,  # seed for the per-step noise offsets
     ctypes.c_double,  # tabu penalty lambda, in temperatures
     ctypes.c_int,  # tabu tenure, in moves
@@ -59,8 +59,8 @@ _lib.pfa_categorical_prepare.argtypes = [
     ctypes.c_int,  # number of other slots
     _i32,  # the other slots, grouped by variable
     _i32,  # variable of each other slot
-    _f64_2d,  # pair terms relative to the reference values (out)
-    _f64,  # fields relative to the reference values (out)
+    _f64_2d,  # couplings between the other slots, relative to the reference slots (out)
+    _f64,  # fields of the other slots, relative to the reference slots (out)
 ]
 _lib.pfa_categorical_prepare.restype = ctypes.c_double
 _lib.pfa_native_simd_path.argtypes = []
@@ -75,7 +75,7 @@ def simd_path() -> str:
 def run(
     couplings: np.ndarray,
     fields: np.ndarray | None = None,
-    groups: np.ndarray | None = None,
+    sizes: np.ndarray | None = None,
     beta_max: float = 1.0,
     num_flips: int = 1000,
     num_reps: int = 1,
@@ -97,19 +97,21 @@ def run(
     memory. The couplings are read in place, without a copy, when they are a
     C-contiguous float64 array.
 
-    With groups, the problem is categorical: each variable takes exactly one of
-    several values. It is given in one-hot form, energy 0.5 * x @ couplings @ x
-    + fields @ x over binary x, with groups[i] the variable that slot i belongs
-    to; couplings within a group are ignored. Every step then changes one
-    variable's value, chosen among all variables and values by the same rule,
-    so no state breaks the one-value-per-variable constraint and no penalty is
-    needed. The tabu acts per variable, for tabu_tenure times the number of
-    variables steps.
+    With sizes, the problem is categorical: variable r takes one integer value
+    x_r in 0 .. sizes[r] - 1. Each value other than 0 has a row and column of
+    the couplings and an entry of the fields, variable by variable (variable
+    0's values 1 .. sizes[0] - 1 first), and the energy sums the fields of the
+    values taken plus half the couplings between every two of them; value 0
+    adds nothing. Couplings between two values of the same variable must be 0.
+    Every step changes one variable's value, chosen among all variables and
+    values by the same rule. The tabu acts per variable, for tabu_tenure times
+    the number of variables steps. categorical_from_one_hot() converts the
+    one-hot form.
 
     Parameters:
         couplings (np.ndarray): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
         fields (np.ndarray, optional): External field terms. Defaults to None.
-        groups (np.ndarray, optional): For categorical problems, the variable of each one-hot slot. Defaults to None.
+        sizes (np.ndarray, optional): For categorical problems, the number of values of each variable. Defaults to None.
         beta_max (float): The maximum inverse temperature. Defaults to 1.0.
         num_flips (int): Steps per repetition, each flipping a spin or changing one variable's value. Defaults to 1000.
         num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far. Defaults to 1.
@@ -119,15 +121,19 @@ def run(
         tabu_tenure (float): How long a spin stays tabu, as a fraction of n flips; 0 turns the tabu
             off. Defaults to 0.25; rarely worth changing.
     Returns:
-        np.ndarray: The lowest-energy state over all repetitions: +-1 spins, or with groups the one-hot x (0/1).
+        np.ndarray: The lowest-energy state over all repetitions: +-1 spins, or with sizes the value of each variable.
     Raises:
         ValueError: If input parameters are invalid.
     """
 
-    if groups is None:
-        validate_hamiltonian(couplings, fields)
-    elif couplings.shape[0] != couplings.shape[1] or (fields is not None and len(fields) != len(couplings)):
-        raise ValueError("Couplings must be a square matrix and fields of the same length")
+    validate_hamiltonian(couplings, fields)
+    if sizes is not None:
+        sizes = np.asarray(sizes, dtype=np.int64)
+        if np.any(sizes < 1) or int(np.sum(sizes - 1)) != len(couplings):
+            raise ValueError("sizes must be positive, with one couplings row per value other than 0: sum(sizes - 1)")
+        ends = np.cumsum(sizes - 1)
+        if any(np.any(couplings[e - q + 1 : e, e - q + 1 : e]) for q, e in zip(sizes, ends) if q > 2):
+            raise ValueError("Couplings between values of the same variable must be zero")
 
     if beta_max <= 0.0:
         raise ValueError("beta_max must be positive")
@@ -139,8 +145,8 @@ def run(
         raise ValueError("tabu_lambda must be non-negative")
     if not 0.0 <= tabu_tenure <= 1.0:
         raise ValueError("tabu_tenure must be between 0 and 1")
-    if groups is not None:
-        return _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
+    if sizes is not None:
+        return _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
     return _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
 
 
@@ -201,65 +207,43 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
     return spins_best.astype(np.int8)
 
 
-def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
-    """run() for categorical problems; values are stored relative to each variable's first value."""
-    couplings = np.asarray(couplings, dtype=np.float64)
-    n = len(couplings)
-    fields = np.zeros(n) if fields is None else np.asarray(fields, dtype=np.float64)
-    _, gid = np.unique(np.asarray(groups), return_inverse=True)
-    if len(gid) != n:
-        raise ValueError("groups must give one variable per slot")
-    V = int(gid.max()) + 1
-    order = np.argsort(gid, kind="stable")                            # slots grouped by variable, in input order
-    sizes = np.bincount(gid, minlength=V)
-    starts = np.concatenate(([0], np.cumsum(sizes)[:-1]))
-    ref = order[starts]                                               # each variable's reference value: its first slot
-    is_ref = np.zeros(n, dtype=bool)
-    is_ref[starts] = True
-    slots = order[~is_ref]                                            # the other values, grouped by variable
-    sgrp = gid[slots].astype(np.int32)
-    multi = sizes > 1                                                 # variables that can change value
+def _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+    """run() for categorical problems, on validated input. Variables with one value never move and are left out."""
+    couplings = np.ascontiguousarray(couplings, dtype=np.float64)
+    m = len(couplings)
+    fields = np.zeros(m) if fields is None else np.asarray(fields, dtype=np.float64)
+    multi = sizes > 1
     msizes = sizes[multi]
-    Vm = len(msizes)
-    mgrp = np.repeat(np.arange(Vm), msizes - 1).astype(np.int32)
-    gs = np.concatenate(([0], np.cumsum(msizes - 1)))
-    m = len(slots)
+    V = len(msizes)
+    starts = np.concatenate(([0], np.cumsum(msizes - 1)))      # rows of variable r: starts[r] .. starts[r + 1] - 1
 
-    # pair terms and fields relative to the reference values, one pass over the input in C
-    Jt = np.empty((m, m))
-    ut = np.empty(m)
-    e0 = _lib.pfa_categorical_prepare(np.ascontiguousarray(couplings), np.ascontiguousarray(fields), n, V,
-                                      ref.astype(np.int32), m, slots.astype(np.int32), sgrp, Jt, ut)
-    if not is_symmetric(Jt):
-        raise ValueError("Couplings between different variables must be symmetric")
-
-    def one_hot(cur):
-        x = np.zeros(n, dtype=np.int8)
-        x[ref] = 1
-        x[ref[multi][cur >= 0]] = 0
-        x[slots[cur[cur >= 0]]] = 1
+    def values(cur):   # current row of each variable (-1: value 0) -> the value of every variable
+        x = np.zeros(len(sizes), dtype=np.int64)
+        x[multi] = np.where(cur < 0, 0, cur - starts[:-1] + 1)
         return x
 
-    if np.all(msizes == 2):   # two values per variable: the spin problem, x = (s + 1) / 2 with s = +1 for the other slot
-        h = 0.5 * ut + 0.25 * Jt.sum(axis=1)
-        Jt *= 0.25
-        spins = _run_spins(Jt, h, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
-        return one_hot(np.where(spins > 0, np.arange(Vm), -1))
+    if np.all(msizes == 2):
+        # x = (s + 1) / 2: the spin problem with couplings C and fields 2 f + C 1 has 4 times the energy (plus a
+        # constant), so it runs at beta / 4
+        spins = _run_spins(couplings, 2.0 * fields + couplings.sum(axis=1), beta_max / 4.0, num_flips, num_reps, seed,
+                           tabu_lambda, tabu_tenure)
+        return values(np.where(spins > 0, np.arange(V), -1))
 
+    grp = np.repeat(np.arange(V), msizes - 1).astype(np.int32)
     rng = np.random.default_rng(seed)
-    tenure = int(tabu_tenure * Vm)
+    tenure = int(tabu_tenure * V)
     energy_best, cur_best = np.inf, None
     for rep in range(num_reps):
         if rep == 0:
-            v = (rng.random(Vm) * msizes).astype(np.int64)               # a uniformly random value per variable
-            cur = np.where(v == 0, -1, gs[:-1] + v - 1).astype(np.int32)
+            v = (rng.random(V) * msizes).astype(np.int64)                 # a uniformly random value per variable
+            cur = np.where(v == 0, -1, starts[:-1] + v - 1).astype(np.int32)
             beta_start = 0.0
         else:
             cur = cur_best.copy()
             beta_start = beta_max * rep / (num_reps - 1)
         on = cur[cur >= 0]
-        F = ut + Jt[:, on].sum(axis=1)
-        energy = e0 + ut[on].sum() + 0.5 * Jt[np.ix_(on, on)].sum()
+        F = fields + couplings[:, on].sum(axis=1)
+        energy = fields[on].sum() + 0.5 * couplings[np.ix_(on, on)].sum()
         noise_vec = -np.log(-np.log(rng.random(m)))
         noise_buffer = np.concatenate((noise_vec, noise_vec)).astype(np.float32)
         offsets_seed = int(rng.integers(1, 2**63))
@@ -267,10 +251,57 @@ def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, s
         energy_c = ctypes.c_double(energy)
         energy_min_c = ctypes.c_double(energy)
         _lib.pfa_categorical_anneal(
-            Jt, F, m, Vm, mgrp, cur, noise_buffer, num_flips, beta_start, beta_max,
+            couplings, F, m, V, grp, cur, noise_buffer, num_flips, beta_start, beta_max,
             ctypes.byref(energy_c), ctypes.byref(energy_min_c), best_cur, offsets_seed, tabu_lambda, tenure,
         )
         if energy_min_c.value < energy_best:
             energy_best, cur_best = energy_min_c.value, best_cur
 
-    return one_hot(cur_best)
+    return values(cur_best)
+
+
+def _one_hot_layout(groups):
+    """Variable of each slot (labels in sorted order), slots grouped by variable in input order, values per variable,
+    and where each variable's slots start in that order."""
+    _, gid = np.unique(np.asarray(groups), return_inverse=True)
+    order = np.argsort(gid, kind="stable")
+    sizes = np.bincount(gid)
+    starts = np.concatenate(([0], np.cumsum(sizes)[:-1]))
+    return gid, order, sizes, starts
+
+
+def categorical_from_one_hot(couplings, fields, groups):
+    """
+    Converts a categorical problem from one-hot form to the form run() takes with sizes.
+
+    One-hot form: energy 0.5 * x @ couplings @ x + fields @ x over binary x with one 1 per variable, groups[i] the
+    variable of slot i; couplings within a variable are ignored. Variables are numbered in sorted order of their
+    labels; value 0 of each is its first slot, the others follow in input order.
+
+    Returns:
+        (couplings, fields, sizes, offset): the energy in one-hot form is the energy in this form plus offset.
+    """
+    couplings = np.ascontiguousarray(couplings, dtype=np.float64)
+    n = len(couplings)
+    fields = np.zeros(n) if fields is None else np.ascontiguousarray(fields, dtype=np.float64)
+    gid, order, sizes, starts = _one_hot_layout(groups)
+    if len(gid) != n:
+        raise ValueError("groups must give one variable per slot")
+    is_first = np.zeros(n, dtype=bool)
+    is_first[starts] = True
+    ref = order[starts].astype(np.int32)
+    rest = order[~is_first]
+    m = len(rest)
+    out_couplings = np.empty((m, m))
+    out_fields = np.empty(m)
+    offset = _lib.pfa_categorical_prepare(couplings, fields, n, len(sizes), ref, m, rest.astype(np.int32),
+                                          gid[rest].astype(np.int32), out_couplings, out_fields)
+    return out_couplings, out_fields, sizes, offset
+
+
+def categorical_to_one_hot(x, groups):
+    """The one-hot x (0/1) of a state given as one value per variable, as run() returns it with sizes."""
+    _, order, _, starts = _one_hot_layout(groups)
+    one_hot = np.zeros(len(order), dtype=np.int8)
+    one_hot[order[starts + np.asarray(x)]] = 1
+    return one_hot
