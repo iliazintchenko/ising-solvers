@@ -35,9 +35,8 @@ _lib.pfa_categorical_anneal.argtypes = [
     _f64_2d,  # pair terms between value slots, relative to each variable's reference value
     _f64,  # fields of the value slots, relative to the reference (updated in place)
     ctypes.c_int,  # number of value slots
-    ctypes.c_int,  # number of variables
-    _i32,  # slot ranges: variable r owns slots [gs[r], gs[r + 1])
-    _i32,  # variable of each slot
+    ctypes.c_int,  # number of variables with more than one value
+    _i32,  # variable of each slot, 0 .. V - 1, slots grouped by variable
     _i32,  # current slot of each variable, -1 at the reference value (updated in place)
     _f32,  # noise buffer, the noise vector stored twice
     ctypes.c_long,  # number of moves
@@ -219,7 +218,11 @@ def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, s
     is_ref[starts] = True
     slots = order[~is_ref]                                            # the other values, grouped by variable
     sgrp = gid[slots].astype(np.int32)
-    gs = np.concatenate(([0], np.cumsum(sizes - 1))).astype(np.int32)
+    multi = sizes > 1                                                 # variables that can change value
+    msizes = sizes[multi]
+    Vm = len(msizes)
+    mgrp = np.repeat(np.arange(Vm), msizes - 1).astype(np.int32)
+    gs = np.concatenate(([0], np.cumsum(msizes - 1)))
     m = len(slots)
 
     # pair terms and fields relative to the reference values, one pass over the input in C
@@ -232,21 +235,23 @@ def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, s
 
     def one_hot(cur):
         x = np.zeros(n, dtype=np.int8)
-        x[np.where(cur < 0, ref, slots[np.maximum(cur, 0)])] = 1
+        x[ref] = 1
+        x[ref[multi][cur >= 0]] = 0
+        x[slots[cur[cur >= 0]]] = 1
         return x
 
-    if np.all(sizes == 2):   # two values per variable: the spin problem, x = (s + 1) / 2 with s = +1 for the other slot
+    if np.all(msizes == 2):   # two values per variable: the spin problem, x = (s + 1) / 2 with s = +1 for the other slot
         h = 0.5 * ut + 0.25 * Jt.sum(axis=1)
         Jt *= 0.25
         spins = _run_spins(Jt, h, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
-        return one_hot(np.where(spins > 0, np.arange(V), -1).astype(np.int32))
+        return one_hot(np.where(spins > 0, np.arange(Vm), -1))
 
     rng = np.random.default_rng(seed)
-    tenure = int(tabu_tenure * V)
+    tenure = int(tabu_tenure * Vm)
     energy_best, cur_best = np.inf, None
     for rep in range(num_reps):
         if rep == 0:
-            v = (rng.random(V) * sizes).astype(np.int64)                 # a uniformly random value per variable
+            v = (rng.random(Vm) * msizes).astype(np.int64)               # a uniformly random value per variable
             cur = np.where(v == 0, -1, gs[:-1] + v - 1).astype(np.int32)
             beta_start = 0.0
         else:
@@ -262,7 +267,7 @@ def _run_categorical(couplings, fields, groups, beta_max, num_flips, num_reps, s
         energy_c = ctypes.c_double(energy)
         energy_min_c = ctypes.c_double(energy)
         _lib.pfa_categorical_anneal(
-            Jt, F, m, V, gs, sgrp, cur, noise_buffer, num_flips, beta_start, beta_max,
+            Jt, F, m, Vm, mgrp, cur, noise_buffer, num_flips, beta_start, beta_max,
             ctypes.byref(energy_c), ctypes.byref(energy_min_c), best_cur, offsets_seed, tabu_lambda, tenure,
         )
         if energy_min_c.value < energy_best:

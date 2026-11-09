@@ -35,3 +35,28 @@ static inline int flip_pass(const double *Ji, double *phi, const float *s, const
 #undef SCORE
     __builtin_trap();
 }
+
+// Categorical pass over whole chunks of 64 slots [0, nv), one vector per step: update, score, and keep the first chunk
+// that reaches the largest score in *bv, *bc. Slots are grouped by variable and every variable has one, so the
+// variables of a vector's slots are grp[k] .. grp[k] + VL - 1: o[grp[k]] is one contiguous load and a table lookup
+// (no gather, which streaming mode lacks; o has 64 entries of padding). The noise is loaded as 32-bit values into
+// 64-bit lanes and widened.
+static inline void cat_chunks(double *F, const double *ra, const double *rb, const int *grp, const double *o,
+                              const float *g, double T, int nv, double *bv, int *bc) SVE_STREAMING {
+    const int64_t VL = (int64_t)svcntd();
+    const svfloat64_t vT = svdup_f64(T);
+    for (int64_t j = 0; j < nv; j += 64) {
+        svfloat64_t B = svdup_f64(-__builtin_inf());
+        for (int64_t k = j; k < j + 64; k += VL) {
+            const svbool_t pg = svwhilelt_b64(k, j + 64);
+            const svfloat64_t f = svadd_x(pg, svsub_x(pg, svld1(pg, F + k), svld1(pg, ra + k)), svld1(pg, rb + k));
+            svst1(pg, F + k, f);
+            const svint64_t gi = svld1sw_s64(pg, grp + k);
+            const svfloat64_t oo = svtbl(svld1(pg, o + grp[k]), svreinterpret_u64(svsub_x(pg, gi, (int64_t)grp[k])));
+            const svfloat64_t gg = svcvt_f64_f32_x(pg, svreinterpret_f32_u64(svld1uw_u64(pg, (const uint32_t *)(g + k))));
+            B = svmax_m(pg, B, svadd_x(pg, svsub_x(pg, oo, f), svmul_x(pg, gg, vT)));
+        }
+        const double v = svmaxv(svptrue_b64(), B);
+        if (v > *bv) { *bv = v; *bc = (int)j; }
+    }
+}

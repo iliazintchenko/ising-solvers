@@ -46,3 +46,28 @@ static inline int flip_pass(const double *Ji, double *phi, const float *s, const
     }
     __builtin_trap();
 }
+
+// Categorical pass over whole chunks of 64 slots [0, nv), 8 slots per step: update, score, and keep the first chunk
+// that reaches the largest score in *bv, *bc.
+static inline double hmax4d(__m256d x) {
+    __m128d m = _mm_max_pd(_mm256_castpd256_pd128(x), _mm256_extractf128_pd(x, 1));
+    return _mm_cvtsd_f64(_mm_max_sd(m, _mm_unpackhi_pd(m, m)));
+}
+static inline void cat_chunks(double *F, const double *ra, const double *rb, const int *grp, const double *o,
+                              const float *g, double T, int nv, double *bv, int *bc) {
+    const __m256d vT = _mm256_set1_pd(T);
+#define CS(B, O) { \
+        const __m256d f = _mm256_add_pd(_mm256_sub_pd(_mm256_loadu_pd(F + k + O), _mm256_loadu_pd(ra + k + O)), \
+                                        _mm256_loadu_pd(rb + k + O)); \
+        _mm256_storeu_pd(F + k + O, f); \
+        const __m256d oo = _mm256_i32gather_pd(o, _mm_loadu_si128((const __m128i *)(grp + k + O)), 8); \
+        B = _mm256_max_pd(B, _mm256_add_pd(_mm256_sub_pd(oo, f), \
+                                           _mm256_mul_pd(_mm256_cvtps_pd(_mm_loadu_ps(g + k + O)), vT))); }
+    for (int j = 0; j < nv; j += 64) {
+        __m256d b0 = _mm256_set1_pd(-__builtin_inf()), b1 = b0;
+        for (int k = j; k < j + 64; k += 8) { CS(b0, 0) CS(b1, 4) }
+        const double v = hmax4d(_mm256_max_pd(b0, b1));
+        if (v > *bv) { *bv = v; *bc = j; }
+    }
+#undef CS
+}

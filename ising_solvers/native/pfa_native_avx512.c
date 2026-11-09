@@ -37,3 +37,24 @@ static inline int flip_pass(const double *Ji, double *phi, const float *s, const
     }
     __builtin_trap();
 }
+
+// Categorical pass over whole chunks of 64 slots [0, nv), 16 slots per step: update, score, and keep the first chunk
+// that reaches the largest score in *bv, *bc.
+static inline void cat_chunks(double *F, const double *ra, const double *rb, const int *grp, const double *o,
+                              const float *g, double T, int nv, double *bv, int *bc) {
+    const __m512d vT = _mm512_set1_pd(T);
+#define CS(B, O) { \
+        const __m512d f = _mm512_add_pd(_mm512_sub_pd(_mm512_loadu_pd(F + k + O), _mm512_loadu_pd(ra + k + O)), \
+                                        _mm512_loadu_pd(rb + k + O)); \
+        _mm512_storeu_pd(F + k + O, f); \
+        const __m512d oo = GATHER512(_mm256_loadu_si256((const __m256i *)(grp + k + O)), o); \
+        B = _mm512_max_pd(B, _mm512_add_pd(_mm512_sub_pd(oo, f), \
+                                           _mm512_mul_pd(CVTPS512(_mm256_loadu_ps(g + k + O)), vT))); }
+    for (int j = 0; j < nv; j += 64) {
+        __m512d b0 = _mm512_set1_pd(-__builtin_inf()), b1 = b0;
+        for (int k = j; k < j + 64; k += 16) { CS(b0, 0) CS(b1, 8) }
+        const double v = _mm512_reduce_max_pd(_mm512_max_pd(b0, b1));
+        if (v > *bv) { *bv = v; *bc = j; }
+    }
+#undef CS
+}

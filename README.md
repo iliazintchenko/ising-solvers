@@ -186,8 +186,11 @@ A flip therefore costs the same on every problem of a given size. The tricks:
   reads nothing extra; the anneal loop adds and removes shifts at O(1) per flip.
 - **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when E
   reaches a new low.
-- **Categorical moves.** Plain C in the same library, without a SIMD path of its own: each move scores every value
-  of every variable, then adds the coupling rows of the values left and entered to the fields.
+- **Categorical moves.** One pass per move, as for spins. Each stored value F(k) is updated with the rows of the
+  value left and the value entered (zeros for the reference) and scored F(a_r) − F(k) − c_r + g_k/β in float64,
+  where c_r is the tabu of its variable r. The term F(a_r) − c_r is computed once per variable before the pass, along
+  with the moves back to each reference. A variable's current value is kept at +∞ during the pass, so it scores −∞
+  without a branch.
 
 ## Usage
 

@@ -32,3 +32,31 @@ static inline int flip_pass(const double *Ji, double *phi, const float *s, const
 #undef SC
     __builtin_trap();
 }
+
+// Categorical pass over whole chunks of 64 slots [0, nv), 8 slots per step: update, score, and keep the first chunk
+// that reaches the largest score in *bv, *bc. NEON has no gather: when the 8 slots belong to one variable (grp is
+// sorted), o[grp[k]] is one broadcast, otherwise it is loaded lane by lane.
+static inline void cat_chunks(double *F, const double *ra, const double *rb, const int *grp, const double *o,
+                              const float *g, double T, int nv, double *bv, int *bc) {
+    const float64x2_t vT = vdupq_n_f64(T);
+#define OL(O) vld1q_lane_f64(o + grp[k + O + 1], vld1q_dup_f64(o + grp[k + O]), 1)
+#define CS(B, O, G, OO) { \
+        const float64x2_t f = vaddq_f64(vsubq_f64(vld1q_f64(F + k + O), vld1q_f64(ra + k + O)), vld1q_f64(rb + k + O)); \
+        vst1q_f64(F + k + O, f); \
+        B = vmaxq_f64(B, vaddq_f64(vsubq_f64(OO, f), vmulq_f64(G, vT))); }
+    for (int j = 0; j < nv; j += 64) {
+        float64x2_t b0 = vdupq_n_f64(-__builtin_inf()), b1 = b0, b2 = b0, b3 = b0;
+        for (int k = j; k < j + 64; k += 8) {
+            const float32x4_t g0 = vld1q_f32(g + k), g1 = vld1q_f32(g + k + 4);
+            float64x2_t o0, o1, o2, o3;
+            if (grp[k] == grp[k + 7]) o0 = o1 = o2 = o3 = vld1q_dup_f64(o + grp[k]);
+            else { o0 = OL(0); o1 = OL(2); o2 = OL(4); o3 = OL(6); }
+            CS(b0, 0, vcvt_f64_f32(vget_low_f32(g0)), o0) CS(b1, 2, vcvt_high_f64_f32(g0), o1)
+            CS(b2, 4, vcvt_f64_f32(vget_low_f32(g1)), o2) CS(b3, 6, vcvt_high_f64_f32(g1), o3)
+        }
+        const double v = vmaxvq_f64(vmaxq_f64(vmaxq_f64(b0, b1), vmaxq_f64(b2, b3)));
+        if (v > *bv) { *bv = v; *bc = j; }
+    }
+#undef CS
+#undef OL
+}

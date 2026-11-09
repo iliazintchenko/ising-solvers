@@ -22,7 +22,8 @@
 // time of its flip, so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
 //
 // This file holds the anneal loop and picks the SIMD path at compile time from the target flags (see the
-// Makefile). Each path lives in its own file and defines one function, flip_pass(), which does the pass:
+// Makefile). Each path lives in its own file and defines the passes, flip_pass() for spins and cat_chunks() for
+// categorical variables:
 //   pfa_native_sve.c     vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
 //   pfa_native_neon.c    2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton2, ...)
 //   pfa_native_avx512.c  8 doubles per vector                 x86-64 with AVX-512
@@ -36,6 +37,8 @@
 // Test-only switches, for checking paths on hardware that lacks them:
 //   -DTEST_STREAMING_SVE  runs the SVE path in SME streaming mode (e.g. Apple M4, -mcpu=apple-m4)
 //   -DTEST_AVX512_SIMDE   runs the AVX-512 path through the SIMDe emulation headers (-I<simde include dir>)
+//   -DTEST_AVX2_SIMDE     runs the AVX2 path through SIMDe
+//   -DTEST_SCALAR         builds the scalar path on any target
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -57,6 +60,12 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
     }
 }
 
+// Categorical score of value slot k: (o[grp[k]] - F[k]) + g[k] * T, after its update F[k] = (F[k] - ra[k]) + rb[k].
+// Every path does these operations in this order, so all paths give bit-identical results.
+static inline double cat_score(const double *F, const int *grp, const double *o, const float *g, double T, int k) {
+    return (o[grp[k]] - F[k]) + (double)g[k] * T;
+}
+
 #if defined(TEST_STREAMING_SVE)
 #include <arm_sme.h>
 #include <arm_sve.h>
@@ -75,7 +84,19 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 #define SIMD_PATH "avx512-simde"
 #define CVT512(D) _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(_mm512_castpd512_pd256(D))), \
                                        _mm256_cvtpd_ps(_mm512_extractf64x4_pd(D, 1)), 1)   // SIMDe lacks _mm512_cvtpd_ps
+#define CVTPS512(X) _mm512_insertf64x4(_mm512_castpd256_pd512(_mm256_cvtps_pd(_mm256_castps256_ps128(X))), \
+                                       _mm256_cvtps_pd(_mm256_extractf128_ps(X, 1)), 1)   // nor _mm512_cvtps_pd
+#define GATHER512(I, B) _mm512_insertf64x4(_mm512_castpd256_pd512(_mm256_i32gather_pd(B, _mm256_castsi256_si128(I), 8)), \
+                                           _mm256_i32gather_pd(B, _mm256_extracti128_si256(I, 1), 8), 1)   // nor gathers
 #include "pfa_native_avx512.c"
+#elif defined(TEST_AVX2_SIMDE)
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#include <simde/x86/avx2.h>
+#define SIMD_PATH "avx2-simde"
+#include "pfa_native_avx2.c"
+#elif defined(TEST_SCALAR)
+#define SIMD_PATH "scalar-test"
+#include "pfa_native_scalar.c"
 #elif defined(__aarch64__) && defined(__ARM_NEON)
 #include <arm_neon.h>
 #define SIMD_PATH "neon"
@@ -84,6 +105,8 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 #include <immintrin.h>
 #define SIMD_PATH "avx512"
 #define CVT512(D) _mm512_cvtpd_ps(D)
+#define CVTPS512(X) _mm512_cvtps_pd(X)
+#define GATHER512(I, B) _mm512_i32gather_pd(I, B, 8)
 #include "pfa_native_avx512.c"
 #elif defined(__AVX2__)
 #include <immintrin.h>
@@ -96,6 +119,9 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 
 #ifndef ANNEAL_ATTR
 #define ANNEAL_ATTR
+#endif
+#ifndef SVE_STREAMING
+#define SVE_STREAMING
 #endif
 
 const char *pfa_native_simd_path(void) { return SIMD_PATH; }
@@ -147,56 +173,93 @@ void pfa_native_anneal(const double *J, double *phi, float *s, const float *nois
     free(pen); free(last); free(recent);
 }
 
-// Categorical (Potts) variables. Variable r takes one of q_r values; the first is its reference, and each other value
-// owns a slot in [gs[r], gs[r + 1]). Values are stored relative to the reference: F[k] is the energy of slot k's value
-// minus that of the reference value, given the other variables' current values, and Jt (m x m, symmetric, zero within
-// a variable) holds the matching pair terms, so every state keeps its energy. cur[r] is the slot of r's value, or -1
-// at the reference. Each step chooses one move among all slots by Gumbel-max: slot k != cur[r] switches r to k, with
-// dE = F[k] - F[cur[r]] (F[-1] = 0); slot k == cur[r] switches r back to its reference, with dE = -F[k]. A move from
-// value a to b updates every field by Jt[b] - Jt[a] (no row for the reference): one or two rows. The tabu acts per
-// variable. With q = 2 every variable has one slot and this is the spin problem; pfa_native_anneal handles that case.
-static int cat_select(const double *F, int V, const int *gs, const int *cur, const double *pen, const float *g, double T,
-                      double *dE_out) {
-    double bs = -__builtin_inf(); int bk = -1; double bdE = 0.0;
-    for (int r = 0; r < V; r++) {
-        int c = cur[r]; double fc = c >= 0 ? F[c] : 0.0, p = pen[r];
-        for (int k = gs[r]; k < gs[r + 1]; k++) {
-            double dE = k == c ? -F[k] : F[k] - fc;
-            double sc = -dE - p + (double)g[k] * T;
-            if (sc > bs) { bs = sc; bk = k; bdE = dE; }
-        }
+// Categorical (Potts) variables. Variable r takes one of q_r >= 2 values; the first is its reference, and each other
+// value owns a slot k, with grp[k] = r (slots grouped by variable). Values are stored relative to the reference: F[k]
+// is the energy of slot k's value minus that of the reference value, given the other variables' current values, and
+// Jt (m x m, symmetric, zero within a variable) holds the matching pair terms, so every state keeps its energy.
+// cur[r] is the slot of r's value, or -1 at the reference.
+// A move from value a to b changes every field by Jt[b] - Jt[a] (the reference has no row: a row of zeros stands in),
+// applied in the next step's pass. Moves to another slot k have dE = F[k] - Fc[r], with Fc[r] = F[cur[r]] (0 at the
+// reference): with o[r] = Fc[r] - pen[r], the score -dE - pen + noise / beta is (o[r] - F[k]) + g[k] / beta. The pass
+// updates F and scores every slot, keeping the maximum per chunk of 64 slots, as in the spin problem. Fc lives apart:
+// F holds +inf at the current slots, so they score -inf. The moves back to the reference, dE = -Fc[r], are scored with
+// o (before the pass, one per variable): (o[r]) + g[cur[r]] / beta; on a tie the pass wins. The tabu acts per variable,
+// through o. With q = 2 every variable has one slot and this is the spin problem; pfa_native_anneal solves it.
+static inline int cat_pass(double *F, const double *ra, const double *rb, const int *grp, const double *o,
+                           const float *g, double T, int m, double *bv_io) SVE_STREAMING {
+    const int nv = m & ~63; double bv = -__builtin_inf(); int bc = 0, bl = -1;
+    cat_chunks(F, ra, rb, grp, o, g, T, nv, &bv, &bc);
+    for (int k = nv; k < m; k++) {
+        F[k] = (F[k] - ra[k]) + rb[k];
+        const double sc = cat_score(F, grp, o, g, T, k);
+        if (sc > bv) { bv = sc; bl = k; }
     }
-    *dE_out = bdE; return bk;
+    *bv_io = bv;
+    if (bl >= 0 || bv == -__builtin_inf()) return bl;
+    for (int k = bc; k < bc + 64; k++) if (cat_score(F, grp, o, g, T, k) == bv) return k;
+    __builtin_trap();
 }
 
-void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int *gs, const int *grp, int *cur,
-                            const float *noise, long nmoves, double beta_start, double beta_max, double *E_io,
-                            double *best_io, int *best_cur, uint64_t seed, double lambda, int tenure) {
+ANNEAL_ATTR static void cat_loop(const double *Jt, double *F, int m, int V, const int *grp, int *cur,
+                                 const float *noise, long nmoves, double beta_start, double beta_max, double *E_io,
+                                 double *best_io, int *best_cur, uint64_t seed, double lambda, int tenure, double *pen,
+                                 long *last, int *recent, double *o, double *Fc, const double *zero) {
     double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nmoves - 1);
-    double *pen = calloc(V, sizeof(double)); long *last = malloc(sizeof(long) * V);
-    int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
-    for (int r = 0; r < V; r++) last[r] = -1;
     uint64_t x = seed | 1;
+    const double *ra = zero, *rb = zero;   // rows of the last move, applied in the next pass
     for (long t = 0; t < nmoves; t++) {
         beta += dbeta;
         x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
-        int offset = (int)(((x * 2685821657736338717ULL) >> 32) * (uint64_t)m >> 32);
-        double dE; int k = cat_select(F, V, gs, cur, pen, noise + offset, 1.0 / beta, &dE);
-        int r = grp[k], a = cur[r], b = k == a ? -1 : k;
-        if (a >= 0) { const double *ra = Jt + (long)a * m; for (int j = 0; j < m; j++) F[j] -= ra[j]; }
-        if (b >= 0) { const double *rb = Jt + (long)b * m; for (int j = 0; j < m; j++) F[j] += rb[j]; }
+        const float *g = noise + (int)(((x * 2685821657736338717ULL) >> 32) * (uint64_t)m >> 32);
+        const double T = 1.0 / beta;
+        double sr = -__builtin_inf(); int rr = -1;   // best move back to a reference
+        for (int r = 0; r < V; r++) {
+            const int c = cur[r];
+            if (c >= 0) {
+                Fc[r] = (Fc[r] - ra[c]) + rb[c];
+                o[r] = Fc[r] - pen[r];
+                const double sc = o[r] + (double)g[c] * T;
+                if (sc > sr) { sr = sc; rr = r; }
+            } else o[r] = -pen[r];
+        }
+        double bv; int k = cat_pass(F, ra, rb, grp, o, g, T, m, &bv);
+        int r, c, b; double dE;
+        if (sr > bv) { r = rr; c = cur[r]; b = -1; dE = -Fc[r]; }
+        else { r = grp[k]; c = cur[r]; b = k; dE = F[k] - (c >= 0 ? Fc[r] : 0.0); }
+        if (c >= 0) F[c] = Fc[r];
+        if (b >= 0) { Fc[r] = F[b]; F[b] = __builtin_inf(); }
+        ra = c >= 0 ? Jt + (long)c * m : zero; rb = b >= 0 ? Jt + (long)b * m : zero;
         cur[r] = b; E += dE;
         if (tenure > 0) {
             if (t >= tenure) {
-                int q = recent[t % tenure];
+                const int q = recent[t % tenure];
                 if (last[q] == t - tenure) pen[q] = 0.0;
             }
             pen[r] = lambda / beta; recent[t % tenure] = r; last[r] = t;
         }
         if (E < best) { best = E; __builtin_memcpy(best_cur, cur, sizeof(int) * V); }
     }
+    for (int k = 0; k < m; k++) F[k] = (F[k] - ra[k]) + rb[k];   // leave the fields of the final state
+    for (int r = 0; r < V; r++) if (cur[r] >= 0) F[cur[r]] = (Fc[r] - ra[cur[r]]) + rb[cur[r]];
     *E_io = E; *best_io = best;
-    free(pen); free(last); free(recent);
+}
+
+// Jt: m x m pair terms; F: m fields (updated in place); grp: variable of each slot, 0..V-1, grouped; cur: V current
+// slots (updated in place); noise: m noise values stored twice; best_cur: V slots (out). As pfa_native_anneal otherwise.
+void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int *grp, int *cur, const float *noise,
+                            long nmoves, double beta_start, double beta_max, double *E_io, double *best_io,
+                            int *best_cur, uint64_t seed, double lambda, int tenure) {
+    double *pen = calloc(V, sizeof(double)), *o = calloc(V + 64, sizeof(double)), *Fc = malloc(sizeof(double) * V);
+    double *zero = calloc(m, sizeof(double));
+    long *last = malloc(sizeof(long) * V);
+    int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
+    for (int r = 0; r < V; r++) {
+        last[r] = -1;
+        if (cur[r] >= 0) { Fc[r] = F[cur[r]]; F[cur[r]] = __builtin_inf(); }
+    }
+    cat_loop(Jt, F, m, V, grp, cur, noise, nmoves, beta_start, beta_max, E_io, best_io, best_cur, seed, lambda,
+             tenure, pen, last, recent, o, Fc, zero);
+    free(pen); free(o); free(Fc); free(zero); free(last); free(recent);
 }
 
 // One-hot input -> reference-value layout, in one pass. C: n x n couplings over all slots, f: n fields; ref[r]: the
