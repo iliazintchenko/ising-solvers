@@ -75,7 +75,7 @@ implementation: full float64 coupling rows, one replica, one core. Their tricks 
 replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
 
 SA proposes one spin at a time and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it
-rejects almost every proposal; PFA never rejects. Its two ingredients have PFA counterparts:
+rejects almost every proposal; PFA never rejects. SA's two ingredients have PFA counterparts:
 
 | SA | PFA | what it does |
 |---|---|---|
@@ -130,10 +130,11 @@ temperature, PFA sits lower in energy than SA and still drifts further from wher
 PFA at β against SA at 2β.)
 
 **Sparse implementations.** The comparison holds on sparse problems as it stands. Written for sparsity, SA updates
-only the flipped spin's d neighbours, and that is all it needs. PFA's selection would still compare all n weights per
-step, because every new noise offset and every change of β moves every weight. A sparse PFA needs a sum tree over the
-rates (the n-fold way) or a priority queue of random clocks (the next-reaction method), at about d log n per flip with
-β held fixed between rebuilds. That version is not compared here.
+only the flipped spin's d neighbours, and that is all it needs. PFA also has to select without touching all n
+weights, though every change of β moves every one. A sum tree over the rates (the n-fold way) does it with β held
+fixed between rebuilds. A tree of each subtree's minimum ΔE does it exactly at every β: −β·min ΔE bounds every
+score in the subtree, and a top-down search with Gumbel noise drawn on demand (A* sampling) finds the winner.
+Updates cost about d log n per flip; the search, about √n nodes in a prototype. That version is not compared here.
 
 ## Implementation
 
@@ -208,8 +209,8 @@ It returns the lowest-energy state seen, as ±1 spins (int8).
 | `couplings` | J, an n × n symmetric matrix with zero diagonal | required | Read in place when it is a C-contiguous float64 array, otherwise copied once. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
-| `num_flips` | flips per repetition, the length of the anneal | `1000` | The whole budget: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
+| `num_flips` | flips per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
-| `seed` | random seed | `42` | Sets the initial spins, the Gumbel noise vector and the per-step offsets, so runs are reproducible. |
+| `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, so results are reproducible. |
 
 `examples/quickstart.py` solves a small problem and measures flips per second.
