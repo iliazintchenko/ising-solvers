@@ -68,6 +68,20 @@ The runs form an outer anneal: each restart reheats the best state less than the
 enough to leave its basin and search widely; late ones refine it. The restarts are `beta_max`/(R−1) apart in β, so
 the outer anneal pays most with many runs.
 
+**Categorical variables.** Often a variable takes exactly one of several values, written as a one-hot group of
+spins. `run_categorical` takes the groups and changes one whole variable per step: variable r moves from its value
+a_r to value k, chosen among all variables and values with
+
+```
+p(r→k) ∝ e^(−β ΔE(r→k)),    ΔE(r→k) = F(k) − F(a_r)
+```
+
+where F(k) is the energy of value k given every other variable's current value. No state ever breaks a group, so
+there is no penalty to set and no climb over one. Each variable keeps its first value as a reference and stores the
+others relative to it: a move reads the coupling row of the value it leaves and of the value it enters, none for the
+reference. With two values per variable that is one stored value and one row per move: the spin problem, solved by
+`run`.
+
 ## Compared with simulated annealing
 
 SA here follows Isakov et al.,
@@ -173,6 +187,8 @@ A flip therefore costs the same on every problem of a given size. The tricks:
   reads nothing extra; the anneal loop adds and removes shifts at O(1) per flip.
 - **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when E
   reaches a new low.
+- **Categorical moves.** Plain C in the same library, without a SIMD path of its own: each move scores every value
+  of every variable, then adds the coupling rows of the values left and entered to the fields.
 
 ## Usage
 
@@ -208,5 +224,16 @@ It returns the lowest-energy state seen, as ±1 spins (int8).
 | `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
 | `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. Rarely worth changing. |
+
+For categorical variables:
+
+```python
+x = pfa_native.run_categorical(couplings, fields, groups, beta_max=1.0, num_moves=1000, num_reps=10)
+```
+
+The problem is in one-hot form, E = ½ xᵀ C x + fᵀ x over x ∈ {0, 1}ⁿ with C = `couplings` and f = `fields`, and
+`groups[i]` the variable that slot i belongs to; couplings within a group are ignored. It returns the lowest-energy x seen, one slot on per group.
+`num_moves` is the number of moves per run; the other parameters are those above, with the tabu acting per variable
+for `tabu_tenure` times the number of variables.
 
 `examples/quickstart.py` solves a small problem and measures flips per second.

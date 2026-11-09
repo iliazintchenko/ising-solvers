@@ -146,3 +146,55 @@ void pfa_native_anneal(const double *J, double *phi, float *s, const float *nois
                 last, recent);
     free(pen); free(last); free(recent);
 }
+
+// Categorical (Potts) variables. Variable r takes one of q_r values; the first is its reference, and each other value
+// owns a slot in [gs[r], gs[r + 1]). Values are stored relative to the reference: F[k] is the energy of slot k's value
+// minus that of the reference value, given the other variables' current values, and Jt (m x m, symmetric, zero within
+// a variable) holds the matching pair terms, so every state keeps its energy. cur[r] is the slot of r's value, or -1
+// at the reference. Each step chooses one move among all slots by Gumbel-max: slot k != cur[r] switches r to k, with
+// dE = F[k] - F[cur[r]] (F[-1] = 0); slot k == cur[r] switches r back to its reference, with dE = -F[k]. A move from
+// value a to b updates every field by Jt[b] - Jt[a] (no row for the reference): one or two rows. The tabu acts per
+// variable. With q = 2 every variable has one slot and this is the spin problem; pfa_native_anneal handles that case.
+static int cat_select(const double *F, int V, const int *gs, const int *cur, const double *pen, const float *g, double T,
+                      double *dE_out) {
+    double bs = -__builtin_inf(); int bk = -1; double bdE = 0.0;
+    for (int r = 0; r < V; r++) {
+        int c = cur[r]; double fc = c >= 0 ? F[c] : 0.0, p = pen[r];
+        for (int k = gs[r]; k < gs[r + 1]; k++) {
+            double dE = k == c ? -F[k] : F[k] - fc;
+            double sc = -dE - p + (double)g[k] * T;
+            if (sc > bs) { bs = sc; bk = k; bdE = dE; }
+        }
+    }
+    *dE_out = bdE; return bk;
+}
+
+void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int *gs, const int *grp, int *cur,
+                            const float *noise, long nmoves, double beta_start, double beta_max, double *E_io,
+                            double *best_io, int *best_cur, uint64_t seed, double lambda, int tenure) {
+    double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nmoves - 1);
+    double *pen = calloc(V, sizeof(double)); long *last = malloc(sizeof(long) * V);
+    int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
+    for (int r = 0; r < V; r++) last[r] = -1;
+    uint64_t x = seed | 1;
+    for (long t = 0; t < nmoves; t++) {
+        beta += dbeta;
+        x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
+        int offset = (int)(((x * 2685821657736338717ULL) >> 32) * (uint64_t)m >> 32);
+        double dE; int k = cat_select(F, V, gs, cur, pen, noise + offset, 1.0 / beta, &dE);
+        int r = grp[k], a = cur[r], b = k == a ? -1 : k;
+        if (a >= 0) { const double *ra = Jt + (long)a * m; for (int j = 0; j < m; j++) F[j] -= ra[j]; }
+        if (b >= 0) { const double *rb = Jt + (long)b * m; for (int j = 0; j < m; j++) F[j] += rb[j]; }
+        cur[r] = b; E += dE;
+        if (tenure > 0) {
+            if (t >= tenure) {
+                int q = recent[t % tenure];
+                if (last[q] == t - tenure) pen[q] = 0.0;
+            }
+            pen[r] = lambda / beta; recent[t % tenure] = r; last[r] = t;
+        }
+        if (E < best) { best = E; __builtin_memcpy(best_cur, cur, sizeof(int) * V); }
+    }
+    *E_io = E; *best_io = best;
+    free(pen); free(last); free(recent);
+}
