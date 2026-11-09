@@ -71,8 +71,8 @@ the outer anneal pays most with many runs.
 
 SA here follows Isakov et al.,
 [Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built like PFA's
-implementation: full float64 coupling rows, one replica, one core. Their tricks for low-precision couplings, many
-replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
+implementation: full float64 coupling rows, one replica, one core. The paper's tricks for low-precision couplings,
+many replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides.
 
 SA proposes one spin at a time and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it
 rejects almost every proposal; PFA never rejects. SA's two ingredients have PFA counterparts:
