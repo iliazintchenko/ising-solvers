@@ -55,20 +55,20 @@ keeps the chain moving between low-energy states instead of re-flipping the same
 (J, h, β → cJ, ch, β/c) or n grows. Both values are measured, not derived, and fixed. The tabu breaks detailed
 balance, which an optimizer doesn't need. It roughly doubles the best `beta_max`.
 
-**Repetitions.** The first run starts from random spins at β = 0. Every later run starts from the best state found so
-far, with fresh noise, and β rising from 0.3·`beta_max`:
+**Repetitions.** The first of R runs starts from random spins at β = 0. Run k starts from the best state found so
+far, with fresh noise, and β rising from a start that grows with k:
 
 ```
-run 1:      random spins         β: 0            → beta_max
-run k > 1:  best state so far    β: 0.3·beta_max → beta_max
+run 1:  random spins         β: 0                      → beta_max
+run k:  best state so far    β: (k−1)/(R−1)·beta_max   → beta_max
 ```
 
-The restart is hot enough, about three times the final temperature, to climb partway out of the best basin found,
-and cold enough to keep its structure; the run then cools into the best basin nearby. Independent runs throw away
-what earlier runs found. A bias toward the best state, a field pulling each spin to its value there, distorts the
-dynamics and drags runs back onto it. The restart changes only where a run starts and how hot; the rule is untouched.
-Like λ, 0.3 is a fixed constant, and as a fraction of `beta_max` it is scale-free. The gain is largest with few runs;
-with many, independent runs already sample many basins.
+The runs form an outer anneal. Each restart reheats the best state less than the one before: early ones are hot
+enough to leave its basin and search widely, late ones only refine it, and the last starts at `beta_max`.
+Independent runs throw away what earlier runs found. A bias toward the best state, a field pulling each spin to its
+value there, distorts the dynamics and drags runs back onto it. A restart sets only a run's starting spins and
+starting β; every flip is still chosen by the same rule, and nothing needs tuning. The starting βs are
+`beta_max`/(R−1) apart, so with few runs most start too hot or too cold; the schedule pays most with many runs.
 
 ## Compared with simulated annealing
 
@@ -212,7 +212,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8).
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
 | `num_flips` | flips per repetition, the length of the anneal | `1000` | The whole budget: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
-| `num_reps` | runs of the anneal | `1` | The first starts from random spins, each later one from the best state so far at 0.3·`beta_max` (see Repetitions); the best state over all runs is returned. |
+| `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
 | `seed` | random seed | `42` | Sets the initial spins, the Gumbel noise vector and the per-step offsets, so runs are reproducible. |
 
 `examples/quickstart.py` solves a small problem and measures flips per second.

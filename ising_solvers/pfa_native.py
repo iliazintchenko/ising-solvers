@@ -31,9 +31,6 @@ _lib.pfa_native_anneal.restype = None
 _lib.pfa_native_simd_path.argtypes = []
 _lib.pfa_native_simd_path.restype = ctypes.c_char_p
 
-# repetitions after the first restart from the best state found so far, with beta ramping up from this fraction of beta_max
-RESTART_BETA = 0.3
-
 
 def simd_path() -> str:
     """Name of the SIMD code path the native library was compiled with."""
@@ -54,9 +51,9 @@ def run(
     chosen with probability proportional to exp(-beta * dE) by Gumbel-max
     sampling, while beta rises linearly from 0 to beta_max. For the n/4 flips
     after a spin flips, its dE is raised by 3 temperatures at the time of its
-    flip (a tabu). The first repetition starts from random spins; each
-    further one restarts from the best state found so far, with beta ramping
-    up from 0.3 * beta_max. Compiled
+    flip (a tabu). The first repetition starts from random spins; repetition
+    k restarts from the best state found so far, with beta ramping up from
+    (k - 1) / (num_reps - 1) * beta_max, so the restarts cool. Compiled
     to native SIMD code on one core: each flip updates the local fields and
     selects the next spin in one pass over memory. The couplings are read in
     place, without a copy, when they are a C-contiguous float64 array.
@@ -98,7 +95,7 @@ def run(
             beta_start = 0.0
         else:
             spins = spins_best.astype(np.float64)
-            beta_start = RESTART_BETA * beta_max
+            beta_start = beta_max * rep / (num_reps - 1)   # restarts cool: from near 0 to beta_max at the last
         energy = get_energy(spins, couplings, fields)
         noise_vec = -np.log(-np.log(rng.random(n)))
         noise_buffer = np.concatenate((noise_vec, noise_vec)).astype(np.float32)
