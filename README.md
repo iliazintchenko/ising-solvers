@@ -200,15 +200,15 @@ A flip therefore costs the same on every problem of a given size. The tricks:
 ## Usage
 
 `make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine, with the one SIMD path
-that matches it:
+that matches it, one file per kernel (spins, categorical variables):
 
-| path | file | used on |
+| path | files | used on |
 |---|---|---|
-| SVE | `pfa_native_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
-| NEON | `pfa_native_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
-| AVX-512 | `pfa_native_avx512.c` | x86-64 with AVX-512 |
-| AVX2 | `pfa_native_avx2.c` | x86-64 with AVX2 |
-| scalar | `pfa_native_scalar.c` | anything else |
+| SVE | `pfa_native_spin_sve.c`, `pfa_native_categorical_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
+| NEON | `pfa_native_spin_neon.c`, `pfa_native_categorical_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
+| AVX-512 | `pfa_native_spin_avx512.c`, `pfa_native_categorical_avx512.c` | x86-64 with AVX-512 |
+| AVX2 | `pfa_native_spin_avx2.c`, `pfa_native_categorical_avx2.c` | x86-64 with AVX2 |
+| scalar | `pfa_native_spin_scalar.c`, `pfa_native_categorical_scalar.c` | anything else |
 
 `pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
 target. Then:

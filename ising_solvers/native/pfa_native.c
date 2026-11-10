@@ -21,14 +21,14 @@
 // is applied by shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = lambda / (4 beta) at the
 // time of its flip, so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
 //
-// This file holds the anneal loop and picks the SIMD path at compile time from the target flags (see the
-// Makefile). Each path lives in its own file and defines the passes, flip_pass() for spins and cat_chunk() for
-// categorical variables:
-//   pfa_native_sve.c     vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
-//   pfa_native_neon.c    2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton2, ...)
-//   pfa_native_avx512.c  8 doubles per vector                 x86-64 with AVX-512
-//   pfa_native_avx2.c    4 doubles per vector                 x86-64 with AVX2 (and FMA)
-//   pfa_native_scalar.c                                       anything else
+// This file holds the anneal loops and picks the SIMD path at compile time from the target flags (see the
+// Makefile). Each path has one file per kernel, pfa_native_spin_<path>.c with flip_pass() for spins and
+// pfa_native_categorical_<path>.c with cat_chunk() for categorical variables:
+//   sve      vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
+//   neon     2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton2, ...)
+//   avx512   8 doubles per vector                 x86-64 with AVX-512
+//   avx2     4 doubles per vector                 x86-64 with AVX2 (and FMA)
+//   scalar                                        anything else
 // The SIMD passes handle spins in groups of 16 and the last n mod 16 spins with tail_pass() below.
 // Every path breaks argmax ties toward the smallest index (like numpy.argmax). Build with -ffp-contract=off:
 // the rescore must reproduce the main loop's scores exactly, so the compiler may not fuse multiply-adds in
@@ -79,44 +79,57 @@ static inline float cat_score(const double *F, const float *S, const int *grp, c
 #define SIMD_PATH "sve-streaming"
 #define SVE_STREAMING __arm_streaming
 #define ANNEAL_ATTR __arm_locally_streaming
-#include "pfa_native_sve.c"
+#define SPIN_PASS "pfa_native_spin_sve.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_sve.c"
 #elif defined(__ARM_FEATURE_SVE)
 #include <arm_sve.h>
 #define SIMD_PATH "sve"
 #define SVE_STREAMING
-#include "pfa_native_sve.c"
+#define SPIN_PASS "pfa_native_spin_sve.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_sve.c"
 #elif defined(TEST_AVX512_SIMDE)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx512.h>
 #define SIMD_PATH "avx512-simde"
 #define CVT512(D) _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(_mm512_castpd512_pd256(D))), \
                                        _mm256_cvtpd_ps(_mm512_extractf64x4_pd(D, 1)), 1)   // SIMDe lacks _mm512_cvtpd_ps
-#include "pfa_native_avx512.c"
+#define X86_PASSES
+#define SPIN_PASS "pfa_native_spin_avx512.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_avx512.c"
 #elif defined(TEST_AVX2_SIMDE)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx2.h>
 #include <simde/x86/fma.h>
 #define SIMD_PATH "avx2-simde"
-#include "pfa_native_avx2.c"
+#define X86_PASSES
+#define SPIN_PASS "pfa_native_spin_avx2.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_avx2.c"
 #elif defined(TEST_SCALAR)
 #define SIMD_PATH "scalar-test"
-#include "pfa_native_scalar.c"
+#define SPIN_PASS "pfa_native_spin_scalar.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_scalar.c"
 #elif defined(__aarch64__) && defined(__ARM_NEON)
 #include <arm_neon.h>
 #define SIMD_PATH "neon"
-#include "pfa_native_neon.c"
+#define SPIN_PASS "pfa_native_spin_neon.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_neon.c"
 #elif defined(__AVX512F__)
 #include <immintrin.h>
 #define SIMD_PATH "avx512"
 #define CVT512(D) _mm512_cvtpd_ps(D)
-#include "pfa_native_avx512.c"
+#define X86_PASSES
+#define SPIN_PASS "pfa_native_spin_avx512.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_avx512.c"
 #elif defined(__AVX2__)
 #include <immintrin.h>
 #define SIMD_PATH "avx2"
-#include "pfa_native_avx2.c"
+#define X86_PASSES
+#define SPIN_PASS "pfa_native_spin_avx2.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_avx2.c"
 #else
 #define SIMD_PATH "scalar"
-#include "pfa_native_scalar.c"
+#define SPIN_PASS "pfa_native_spin_scalar.c"
+#define CATEGORICAL_PASS "pfa_native_categorical_scalar.c"
 #endif
 
 #ifndef ANNEAL_ATTR
@@ -125,6 +138,24 @@ static inline float cat_score(const double *F, const float *S, const int *grp, c
 #ifndef SVE_STREAMING
 #define SVE_STREAMING
 #endif
+
+#ifdef X86_PASSES   // shared by the x86 passes: fused multiply-adds when built with FMA (any AVX2 CPU has it)
+#if defined(__FMA__) || defined(TEST_AVX2_SIMDE)
+#define FMA8(A, B, C) _mm256_fmadd_ps(A, B, C)
+#define FMA4(A, B, C) _mm_fmadd_ps(A, B, C)
+#else
+#define FMA8(A, B, C) _mm256_add_ps(_mm256_mul_ps(A, B), C)
+#define FMA4(A, B, C) _mm_add_ps(_mm_mul_ps(A, B), C)
+#endif
+static inline float hmax8(__m256 x) {
+    __m128 m = _mm_max_ps(_mm256_castps256_ps128(x), _mm256_extractf128_ps(x, 1));
+    m = _mm_max_ps(m, _mm_movehl_ps(m, m));
+    return _mm_cvtss_f32(_mm_max_ss(m, _mm_shuffle_ps(m, m, 1)));
+}
+#endif
+
+#include SPIN_PASS          // flip_pass()
+#include CATEGORICAL_PASS   // cat_chunk()
 
 const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 
