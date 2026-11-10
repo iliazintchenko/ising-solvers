@@ -199,8 +199,8 @@ A flip therefore costs the same on every problem of a given size. The tricks:
 
 ## Usage
 
-`make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine, with the one SIMD path
-that matches it, one file per kernel (spins, categorical variables):
+`make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the two
+kernels, `pfa_native_spin.c` and `pfa_native_categorical.c`, each with the one SIMD path that matches the machine:
 
 | path | files | used on |
 |---|---|---|

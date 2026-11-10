@@ -1,7 +1,7 @@
-// AVX-512 pass for categorical variables (included by pfa_native.c), over one chunk of slots [j, end). 16 slots per
-// step = 2 float64 vectors of fields -> 2 float32 score vectors of 8: update (subtract a row, add a row, or both),
-// score, and return the largest score. Where blk gives 8 slots one o, it is one broadcast; otherwise o[grp[k]] is
-// gathered.
+// AVX-512 pass for categorical variables (included by pfa_native_categorical.c), over one chunk of slots [j, end).
+// 16 slots per step = 2 float64 vectors of fields -> 2 float32 score vectors of 8: update (subtract a row, add a row,
+// or both), score, and return the largest score. Where blk gives 8 slots one o, it is one broadcast; otherwise
+// o[grp[k]] is gathered.
 static inline float cat_chunk(double *F, const float *S, const double *ra, const double *rb, const int *grp,
                               const int *blk, const float *o, const float *g, float T, int j, int end) {
     const __m256 vT = _mm256_set1_ps(T);

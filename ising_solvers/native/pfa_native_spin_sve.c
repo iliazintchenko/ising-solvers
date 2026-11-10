@@ -1,6 +1,6 @@
-// SVE pass for spins (included by pfa_native.c), vector-length agnostic: a group is 2 float64 vectors of local fields
-// = one float32 score vector, a chunk is 4 groups, predicates cover the end of the arrays. The chunk holding the
-// maximum is tracked per lane without branches. Subtracts si * Ji from phi and returns the next spin, the first
+// SVE pass for spins (included by pfa_native_spin.c), vector-length agnostic: a group is 2 float64 vectors of local
+// fields = one float32 score vector, a chunk is 4 groups, predicates cover the end of the arrays. The chunk holding
+// the maximum is tracked per lane without branches. Subtracts si * Ji from phi and returns the next spin, the first
 // to reach max_j(s_j phi_j + nz_j * inv).
 static inline int flip_pass(const double *Ji, double *phi, const float *s, const float *nz, int n, double si,
                             float inv) SVE_STREAMING {

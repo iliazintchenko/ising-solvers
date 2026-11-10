@@ -1,10 +1,10 @@
-// SVE pass for categorical variables (included by pfa_native.c), over one chunk of slots [j, end). One float64
-// vector of fields per step: update (subtract a row, add a row, or both), score, and return the largest score. The
-// float32 scores stay in the low halves of the 64-bit lanes: signs, noise and o are loaded as 32-bit values into
-// 64-bit lanes. Where blk gives the vector's slots one o (vectors that divide a block of 8), it is one broadcast.
-// Otherwise: slots are grouped by variable and every variable has one, so the variables of a vector's slots are
-// grp[k] .. grp[k] + VL - 1, and o[grp[k]] is one contiguous load and a table lookup (no gather, which streaming
-// mode lacks; o has 64 entries of padding).
+// SVE pass for categorical variables (included by pfa_native_categorical.c), over one chunk of slots [j, end).
+// One float64 vector of fields per step: update (subtract a row, add a row, or both), score, and return the largest
+// score. The float32 scores stay in the low halves of the 64-bit lanes: signs, noise and o are loaded as 32-bit
+// values into 64-bit lanes. Where blk gives the vector's slots one o (vectors that divide a block of 8), it is one
+// broadcast. Otherwise: slots are grouped by variable and every variable has one, so the variables of a vector's
+// slots are grp[k] .. grp[k] + VL - 1, and o[grp[k]] is one contiguous load and a table lookup (no gather, which
+// streaming mode lacks; o has 64 entries of padding).
 static inline float cat_chunk(double *F, const float *S, const double *ra, const double *rb, const int *grp,
                               const int *blk, const float *o, const float *g, float T, int j, int end) SVE_STREAMING {
     const int64_t VL = (int64_t)svcntd(), END = end;
