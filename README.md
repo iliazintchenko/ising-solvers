@@ -184,13 +184,18 @@ A flip therefore costs the same on every problem of a given size. The tricks:
 - **Tabu for free.** The penalty, c_i = λ / (4β_i) in score units, is folded into the stored field,
   φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
   reads nothing extra; the anneal loop adds and removes shifts at O(1) per flip.
-- **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when E
-  reaches a new low.
-- **Categorical moves.** One pass per move, as for spins. Each stored value F(k) is updated with the rows of the
-  value left and the value entered (zeros for value 0) and scored F(a_r) − F(k) − c_r + g_k/β in float64,
-  where c_r is the tabu of its variable r. The term F(a_r) − c_r is computed once per variable before the pass, along
-  with the moves back to value 0. A variable's current value is kept at +∞ during the pass, so it scores −∞
-  without a branch.
+- **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when the
+  anneal steps up from a new low, so a descent through many new lows costs one copy.
+- **Categorical moves.** One pass per move, as for spins: every value k other than 0 is one move, scored in float32
+
+  ```
+  o_r + S_k F(k) + g_k / β
+  ```
+
+  A move of variable r to k has S_k = −1 and o_r = F(a_r) − c_r, with c_r the tabu of r; the move from the current
+  value back to 0 has S_k = 0. A variable with two values is a spin: its one value scores with S_k = ±1 and o_r = 0,
+  its tabu folded into F as above. The pass updates every F(k) with the row of the value left and of the value
+  entered, none for value 0, and reads o_r only for variables with more than two values, as it reaches them.
 
 ## Usage
 
