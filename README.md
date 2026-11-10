@@ -145,9 +145,10 @@ PFA at β against SA at 2β.)
 
 ## Implementation
 
-The annealer runs in compiled C with SIMD, on one core, on any couplings and fields. Every flip reads one full
-float64 row of couplings, zeros included, and updates all n local fields; the selection rides along in the same pass.
-A flip therefore costs the same on every problem of a given size. The tricks:
+The annealer runs in compiled C with SIMD, on one core, on any couplings and fields. With the couplings as an array,
+every flip reads one full float64 row, zeros included, and updates all n local fields; the selection rides along in
+the same pass. A flip therefore costs the same on every problem of a given size. Sparse couplings run on kernels of
+their own (see Sparse couplings). The tricks:
 
 - **Gumbel-max sampling.** Drawing from p_j directly costs n exponentials and a normalization per step. The
   [Gumbel-max trick](https://lips.cs.princeton.edu/the-gumbel-max-trick-for-discrete-distributions/) removes both:
@@ -197,18 +198,51 @@ A flip therefore costs the same on every problem of a given size. The tricks:
   its tabu folded into F as above. The pass updates every F(k) with the row of the value left and of the value
   entered, none for value 0, and reads o_r only for variables with more than two values, as it reaches them.
 
+### Sparse couplings
+
+Given as a `scipy.sparse` matrix, only the stored couplings are kept, and the anneal makes the same steps as on the
+array: same scores, same noise, same tabu, same result. What changes is the cost of a step.
+
+- **Fields.** Flipping spin i changes φ_j only for the d neighbours of i: d adds instead of n.
+- **Selection without a pass.** The score of spin j is a_j + g_j / (4β) with a_j = s_j φ_j. Every score changes at
+  every step, with β and with the noise offset, but a_j changes only for the neighbours. Spins are grouped in blocks
+  of 64, blocks in groups of 64 blocks, and so on. Each group keeps a bound A on the a_j of its spins, and a table
+  built once per run gives G, the largest noise value its spins can read at this step's offset. Then
+
+  ```
+  max over the group of (a_j + g_j / (4β))  ≤  A + G / (4β)
+  ```
+
+  The search starts at the top, enters the group with the largest bound first, and then every other group whose
+  bound still reaches the best score found. The bound holds at every β, so nothing is rebuilt as the anneal cools.
+  It holds in float32 too, because rounding is monotone, so the spin returned is exactly the one a full pass returns.
+- **Bounds kept lazily.** A is raised when an a_j below it rises, and lowered to the true maximum only when the
+  search enters the group. A bound left too high costs one visit, never a wrong pick.
+- **Noise windows.** At offset o, a group of B spins starting at spin c reads the B noise values from c + o on. G is
+  the maximum of exactly that window, from a table with one row per o mod B; for the largest groups, where that table
+  would not fit, it is the maximum over the two aligned stretches of B values that contain the window.
+- **Categorical.** Couplings are kept as full tables between coupled variables. A move of variable r updates F for
+  the values of r's neighbours only, and those values get new scores, since o changes with the field of a neighbour's
+  current value. The same search finds the next move.
+- **Best state.** It is brought up to date from a list of the spins flipped since it was last written, not copied.
+
+A step costs d field updates plus the groups visited, and the visits grow about as √n. The sparse kernels are the
+faster ones from a few hundred spins up, as long as fewer than about a tenth of the couplings are nonzero.
+
 ## Usage
 
-`make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the two
-kernels, `pfa_native_spin.c` and `pfa_native_categorical.c`, each with the one SIMD path that matches the machine:
+`make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the four
+kernels: `pfa_native_spin.c` and `pfa_native_categorical.c` for couplings as an array, and `pfa_native_sparse_spin.c`
+and `pfa_native_sparse_categorical.c`, which share the search of `pfa_native_tree.c`. Each uses the one SIMD path that
+matches the machine:
 
 | path | files | used on |
 |---|---|---|
-| SVE | `pfa_native_spin_sve.c`, `pfa_native_categorical_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
-| NEON | `pfa_native_spin_neon.c`, `pfa_native_categorical_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
-| AVX-512 | `pfa_native_spin_avx512.c`, `pfa_native_categorical_avx512.c` | x86-64 with AVX-512 |
-| AVX2 | `pfa_native_spin_avx2.c`, `pfa_native_categorical_avx2.c` | x86-64 with AVX2 |
-| scalar | `pfa_native_spin_scalar.c`, `pfa_native_categorical_scalar.c` | anything else |
+| SVE | `pfa_native_spin_sve.c`, `pfa_native_categorical_sve.c`, `pfa_native_tree_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
+| NEON | `pfa_native_spin_neon.c`, `pfa_native_categorical_neon.c`, `pfa_native_tree_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
+| AVX-512 | `pfa_native_spin_avx512.c`, `pfa_native_categorical_avx512.c`, `pfa_native_tree_avx512.c` | x86-64 with AVX-512 |
+| AVX2 | `pfa_native_spin_avx2.c`, `pfa_native_categorical_avx2.c`, `pfa_native_tree_avx2.c` | x86-64 with AVX2 |
+| scalar | `pfa_native_spin_scalar.c`, `pfa_native_categorical_scalar.c`, `pfa_native_tree_scalar.c` | anything else |
 
 `pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
 target. Then:
@@ -224,7 +258,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as
 
 | parameter | what it is | default | theory |
 |---|---|---|---|
-| `couplings` | J, an n × n symmetric matrix with zero diagonal | required | Read in place when it is a C-contiguous float64 array, otherwise copied once. |
+| `couplings` | J, an n × n symmetric matrix with zero diagonal: an array or a `scipy.sparse` matrix | required | An array is read in place when it is C-contiguous float64, otherwise copied once. A `scipy.sparse` matrix runs on the sparse kernels (see Sparse couplings). |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |

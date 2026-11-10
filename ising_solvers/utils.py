@@ -67,11 +67,12 @@ def validate_hamiltonian(
 
     if couplings.shape[0] != couplings.shape[1]:
         raise ValueError("Couplings must be square matrix")
-    if fields is not None and len(fields) != len(couplings):
+    if fields is not None and len(fields) != couplings.shape[0]:
         raise ValueError("Fields must have the same length as couplings matrix")
-    if not np.allclose(np.diag(couplings), 0.0):
+    sparse = hasattr(couplings, "tocsr")   # a scipy.sparse matrix
+    if not np.allclose(couplings.diagonal() if sparse else np.diag(couplings), 0.0):
         raise ValueError("Couplings diagonal must be zero")
-    if not is_symmetric(couplings):
+    if (couplings != couplings.T).nnz if sparse else not is_symmetric(couplings):
         raise ValueError("Couplings must be symmetric matrix")
 
 
