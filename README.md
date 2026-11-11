@@ -145,10 +145,10 @@ PFA at β against SA at 2β.)
 
 ## Implementation
 
-The annealer runs in compiled C with SIMD, on one core, on any couplings and fields. With the couplings as an array,
-every flip reads one full float64 row, zeros included, and updates all n local fields; the selection rides along in
-the same pass. A flip therefore costs the same on every problem of a given size. Sparse couplings run on kernels of
-their own (see Sparse couplings). The tricks:
+The annealer runs in compiled C with SIMD, on one core, on any couplings and fields. On the array kernels, every flip
+reads one full float64 row, zeros included, and updates all n local fields; the selection rides along in the same
+pass. A flip therefore costs the same on every problem of a given size. Problems with few couplings per spin run on
+sparse kernels instead (see Sparse couplings). The tricks of the array kernels:
 
 - **Gumbel-max sampling.** Drawing from p_j directly costs n exponentials and a normalization per step. The
   [Gumbel-max trick](https://lips.cs.princeton.edu/the-gumbel-max-trick-for-discrete-distributions/) removes both:
@@ -200,9 +200,10 @@ their own (see Sparse couplings). The tricks:
 
 ### Sparse couplings
 
-Given as a `scipy.sparse` matrix, only the stored couplings are kept, and no step passes over all spins. Schedule,
-fields, tabu and bookkeeping are those of the array kernels. The selection is not, so the same seed gives a different
-run.
+When each spin has few neighbours, `run()` uses kernels that keep only the nonzero couplings, and no step passes over
+all spins. The input format plays no part: the same couplings as an array or as a `scipy.sparse` matrix give the same
+run. Schedule, fields, tabu and bookkeeping are those of the array kernels. The selection is not, so a seed gives a
+different run on the sparse kernels than on the array kernels.
 
 - **Fields.** Flipping spin i changes φ_j only for the d neighbours of i: d adds instead of n.
 - **Selection without a pass.** Stored noise changes every score at every step, because the offset moves. Fresh
@@ -236,9 +237,17 @@ run.
   neighbour's current value. The same tree draws the next move.
 - **Best state.** It is brought up to date from a list of the spins flipped since it was last written, not copied.
 
-A step costs one exponential per changed weight, d + 1 for spins and every value of the neighbours for categorical
-variables, plus the walks down the tree. The sparse spin kernel is the faster one from about 500 spins up when fewer
-than about 3% of the couplings are nonzero, the categorical one when fewer than about 8% are.
+A sparse step costs a fixed part plus one exponential per changed weight; an array step costs one pass over all n
+rows of the couplings. `run()` takes the sparse kernel where that is the cheaper step:
+
+```
+spins:        d < n / 30 − 7        d: mean number of neighbours of a spin
+categorical:  c < n / 9 − 20        c: mean number of values of a variable's neighbours
+```
+
+The constants are fitted to timings of both kernels on one machine (Apple M4). For spins that is fewer than about 3%
+of the couplings nonzero from a few hundred spins up; for categorical variables, about a tenth of the value pairs
+coupled.
 
 ## Usage
 
@@ -269,13 +278,13 @@ It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as
 
 | parameter | what it is | default | theory |
 |---|---|---|---|
-| `couplings` | J, an n × n symmetric matrix with zero diagonal: an array or a `scipy.sparse` matrix | required | An array is read in place when it is C-contiguous float64, otherwise copied once. A `scipy.sparse` matrix runs on the sparse kernels (see Sparse couplings). |
+| `couplings` | J, an n × n symmetric matrix with zero diagonal: an array or a `scipy.sparse` matrix | required | The format does not change the run: `run()` picks the array or the sparse kernels from the number of nonzero couplings (see Sparse couplings). The array kernels read a C-contiguous float64 array in place; any other input is converted once, a `scipy.sparse` matrix to n × n float64. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
 | `num_flips` | steps per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
-| `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, or with sparse couplings its draws, so results are reproducible. |
+| `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, or on the sparse kernels its draws, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
 | `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `sizes`, the tabu acts per variable, and n is the number of variables. Rarely worth changing. |
 
