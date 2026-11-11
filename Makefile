@@ -14,9 +14,10 @@ SRC := ising_solvers/native/pfa_native.c
 LIB := ising_solvers/native/libpfa_native.so
 
 # pfa_native.c includes the kernels (pfa_native_spin.c, pfa_native_categorical.c, pfa_native_sparse_spin.c,
-# pfa_native_sparse_categorical.c) and pfa_native_tree.c, and those the pfa_native_<name>_<path>.c that match the target
+# pfa_native_sparse_categorical.c) and pfa_native_sums.c, and the first two the pfa_native_<name>_<path>.c that match
+# the target
 $(LIB): $(SRC) $(wildcard ising_solvers/native/pfa_native_*.c)
-	$(CC) -O3 -ffp-contract=off -fPIC -shared $(ARCH_FLAGS) -o $@ $(SRC)
+	$(CC) -O3 -ffp-contract=off -fPIC -shared $(ARCH_FLAGS) -o $@ $(SRC) -lm
 
 .PHONY: clean
 clean:

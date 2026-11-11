@@ -200,49 +200,60 @@ their own (see Sparse couplings). The tricks:
 
 ### Sparse couplings
 
-Given as a `scipy.sparse` matrix, only the stored couplings are kept, and the anneal makes the same steps as on the
-array: same scores, same noise, same tabu, same result. What changes is the cost of a step.
+Given as a `scipy.sparse` matrix, only the stored couplings are kept, and no step passes over all spins. Schedule,
+fields, tabu and bookkeeping are those of the array kernels. The selection is not, so the same seed gives a different
+run.
 
 - **Fields.** Flipping spin i changes φ_j only for the d neighbours of i: d adds instead of n.
-- **Selection without a pass.** The score of spin j is a_j + g_j / (4β) with a_j = s_j φ_j. Every score changes at
-  every step, with β and with the noise offset, but a_j changes only for the neighbours. Spins are grouped in blocks
-  of 64, blocks in groups of 64 blocks, and so on. Each group keeps a bound A on the a_j of its spins, and a table
-  built once per run gives G, the largest noise value its spins can read at this step's offset. Then
+- **Selection without a pass.** Stored noise changes every score at every step, because the offset moves. Fresh
+  noise at every step gives p_j ∝ e^(−β ΔE_j), and p_j can be drawn directly: it costs one exponential per ΔE that
+  changed, n with an array, d + 1 here. The weights w_j = e^(−β ΔE_j) are the leaves of a tree of sums with fan-out 8,
+  every entry the sum of the 8 below it. A uniform number times the total, followed down the tree, lands on spin j
+  with probability
 
   ```
-  max over the group of (a_j + g_j / (4β))  ≤  A + G / (4β)
+  w_j / Σ_k w_k
   ```
 
-  The search starts at the top, enters the group with the largest bound first, and then every other group whose
-  bound still reaches the best score found. The bound holds at every β, so nothing is rebuilt as the anneal cools.
-  It holds in float32 too, because rounding is monotone, so the spin returned is exactly the one a full pass returns.
-- **Bounds kept lazily.** A is raised when an a_j below it rises, and lowered to the true maximum only when the
-  search enters the group. A bound left too high costs one visit, never a wrong pick.
-- **Noise windows.** At offset o, a group of B spins starting at spin c reads the B noise values from c + o on. G is
-  the maximum of exactly that window, from a table with one row per o mod B; for the largest groups, where that table
-  would not fit, it is the maximum over the two aligned stretches of B values that contain the window.
+  A flip gives new weights to the flipped spin and its neighbours. The sums above them are recomputed from their 8
+  children, so rounding errors do not build up. A draw or an update touches log₈ n entries.
+- **β moves at every flip**, and with it every weight. The tree keeps the weights of an earlier β₀, and the draw is
+  corrected: spin j is accepted with probability
+
+  ```
+  e^(−(β − β₀) (ΔE_j − ΔE_min))        ΔE_min ≤ every ΔE
+  ```
+
+  and otherwise drawn again. Weight times acceptance is proportional to e^(−β ΔE_j), so the spin flipped has exactly
+  the distribution of this step's β. A draw that is not accepted costs a walk down the tree, not a step.
+- **Recomputing the weights.** Rejections become more frequent as β leaves β₀. If they cost a · k at the k-th step
+  after all weights were computed, and computing them costs R, a cycle of K steps costs R/K + a K/2 per step: least
+  when a K²/2 = R. So all weights are recomputed, at the current β, when the rejected draws since the last time have
+  cost as much as that takes. Weights are kept relative to the largest, and are also recomputed if their total leaves
+  the range of a float64.
 - **Categorical.** Couplings are kept as full tables between coupled variables. A move of variable r updates F for
-  the values of r's neighbours only, and those values get new scores, since o changes with the field of a neighbour's
-  current value. The same search finds the next move.
+  the values of r's neighbours only, and those values get new weights, since o changes with the field of a
+  neighbour's current value. The same tree draws the next move.
 - **Best state.** It is brought up to date from a list of the spins flipped since it was last written, not copied.
 
-A step costs d field updates plus the groups visited, and the visits grow about as √n. The sparse kernels are the
-faster ones from a few hundred spins up, as long as fewer than about a tenth of the couplings are nonzero.
+A step costs one exponential per changed weight, d + 1 for spins and every value of the neighbours for categorical
+variables, plus the walks down the tree. The sparse spin kernel is the faster one from about 500 spins up when fewer
+than about 3% of the couplings are nonzero, the categorical one when fewer than about 8% are.
 
 ## Usage
 
 `make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the four
 kernels: `pfa_native_spin.c` and `pfa_native_categorical.c` for couplings as an array, and `pfa_native_sparse_spin.c`
-and `pfa_native_sparse_categorical.c`, which share the search of `pfa_native_tree.c`. Each uses the one SIMD path that
-matches the machine:
+and `pfa_native_sparse_categorical.c`, which draw from the tree of sums of `pfa_native_sums.c`. The first two use the
+one SIMD path that matches the machine; the sparse two are the same code on every path:
 
 | path | files | used on |
 |---|---|---|
-| SVE | `pfa_native_spin_sve.c`, `pfa_native_categorical_sve.c`, `pfa_native_tree_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
-| NEON | `pfa_native_spin_neon.c`, `pfa_native_categorical_neon.c`, `pfa_native_tree_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
-| AVX-512 | `pfa_native_spin_avx512.c`, `pfa_native_categorical_avx512.c`, `pfa_native_tree_avx512.c` | x86-64 with AVX-512 |
-| AVX2 | `pfa_native_spin_avx2.c`, `pfa_native_categorical_avx2.c`, `pfa_native_tree_avx2.c` | x86-64 with AVX2 |
-| scalar | `pfa_native_spin_scalar.c`, `pfa_native_categorical_scalar.c`, `pfa_native_tree_scalar.c` | anything else |
+| SVE | `pfa_native_spin_sve.c`, `pfa_native_categorical_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
+| NEON | `pfa_native_spin_neon.c`, `pfa_native_categorical_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
+| AVX-512 | `pfa_native_spin_avx512.c`, `pfa_native_categorical_avx512.c` | x86-64 with AVX-512 |
+| AVX2 | `pfa_native_spin_avx2.c`, `pfa_native_categorical_avx2.c` | x86-64 with AVX2 |
+| scalar | `pfa_native_spin_scalar.c`, `pfa_native_categorical_scalar.c` | anything else |
 
 `pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
 target. Then:
@@ -264,7 +275,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
 | `num_flips` | steps per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
-| `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, so results are reproducible. |
+| `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, or with sparse couplings its draws, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
 | `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `sizes`, the tabu acts per variable, and n is the number of variables. Rarely worth changing. |
 

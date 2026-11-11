@@ -5,13 +5,13 @@
 //   pfa_native_sparse_spin.c          spins, sparse couplings: pfa_sparse_anneal()
 //   pfa_native_sparse_categorical.c   categorical variables, sparse couplings: pfa_sparse_categorical_anneal()
 // Each holds its anneal loop. The first two include their pass over memory for the chosen path,
-// pfa_native_spin_<path>.c or pfa_native_categorical_<path>.c; the sparse two share the selection tree of
-// pfa_native_tree.c, which includes pfa_native_tree_<path>.c:
+// pfa_native_spin_<path>.c or pfa_native_categorical_<path>.c:
 //   sve      vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
 //   neon     2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton2, ...)
 //   avx512   8 doubles per vector                 x86-64 with AVX-512
 //   avx2     4 doubles per vector                 x86-64 with AVX2 (and FMA)
 //   scalar                                        anything else
+// The sparse two draw from the tree of sums of pfa_native_sums.c, the same code on every path.
 // Build with -ffp-contract=off: each kernel rescores the winning chunk and must reproduce the pass's scores exactly,
 // so the compiler may not fuse multiply-adds in one place and not the other.
 //
@@ -37,14 +37,12 @@
 #define ANNEAL_ATTR __arm_locally_streaming
 #define SPIN_PASS "pfa_native_spin_sve.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_sve.c"
-#define TREE_BLOCK "pfa_native_tree_sve.c"
 #elif defined(__ARM_FEATURE_SVE)
 #include <arm_sve.h>
 #define SIMD_PATH "sve"
 #define SVE_STREAMING
 #define SPIN_PASS "pfa_native_spin_sve.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_sve.c"
-#define TREE_BLOCK "pfa_native_tree_sve.c"
 #elif defined(TEST_AVX512_SIMDE)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx512.h>
@@ -54,7 +52,6 @@
 #define X86_PASSES
 #define SPIN_PASS "pfa_native_spin_avx512.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_avx512.c"
-#define TREE_BLOCK "pfa_native_tree_avx512.c"
 #elif defined(TEST_AVX2_SIMDE)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx2.h>
@@ -63,18 +60,15 @@
 #define X86_PASSES
 #define SPIN_PASS "pfa_native_spin_avx2.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_avx2.c"
-#define TREE_BLOCK "pfa_native_tree_avx2.c"
 #elif defined(TEST_SCALAR)
 #define SIMD_PATH "scalar-test"
 #define SPIN_PASS "pfa_native_spin_scalar.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_scalar.c"
-#define TREE_BLOCK "pfa_native_tree_scalar.c"
 #elif defined(__aarch64__) && defined(__ARM_NEON)
 #include <arm_neon.h>
 #define SIMD_PATH "neon"
 #define SPIN_PASS "pfa_native_spin_neon.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_neon.c"
-#define TREE_BLOCK "pfa_native_tree_neon.c"
 #elif defined(__AVX512F__)
 #include <immintrin.h>
 #define SIMD_PATH "avx512"
@@ -82,19 +76,16 @@
 #define X86_PASSES
 #define SPIN_PASS "pfa_native_spin_avx512.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_avx512.c"
-#define TREE_BLOCK "pfa_native_tree_avx512.c"
 #elif defined(__AVX2__)
 #include <immintrin.h>
 #define SIMD_PATH "avx2"
 #define X86_PASSES
 #define SPIN_PASS "pfa_native_spin_avx2.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_avx2.c"
-#define TREE_BLOCK "pfa_native_tree_avx2.c"
 #else
 #define SIMD_PATH "scalar"
 #define SPIN_PASS "pfa_native_spin_scalar.c"
 #define CATEGORICAL_PASS "pfa_native_categorical_scalar.c"
-#define TREE_BLOCK "pfa_native_tree_scalar.c"
 #endif
 
 #ifndef ANNEAL_ATTR
@@ -123,6 +114,6 @@ const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 
 #include "pfa_native_spin.c"
 #include "pfa_native_categorical.c"
-#include "pfa_native_tree.c"
+#include "pfa_native_sums.c"
 #include "pfa_native_sparse_spin.c"
 #include "pfa_native_sparse_categorical.c"
