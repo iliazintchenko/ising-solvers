@@ -120,7 +120,9 @@ def run(
     are faster: they store only the nonzero couplings, update the fields of
     the neighbours only, and draw the next spin with the same probability
     from a tree of sums of the weights exp(-beta * dE). A seed gives a
-    different run on the sparse kernels than on the array kernels.
+    different run on the sparse kernels than on the array kernels. If the
+    array of the array kernels would take more than half of the machine's
+    memory, the kernel whose couplings take less memory runs instead.
 
     With sizes, the problem is categorical: variable r takes one integer value
     x_r in 0 .. sizes[r] - 1. Each value other than 0 has a row and column of
@@ -195,13 +197,28 @@ def _sparse_is_faster(changed, size, spins):
     return changed < (size / 30 - 7 if spins else size / 9 - 20)
 
 
+def _memory():
+    """Bytes of memory of this machine."""
+    return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+
+
+def _use_sparse(changed, size, spins, stored):
+    """Whether the sparse kernel runs the problem: where its step is faster. The array kernel needs the couplings as
+    a size x size float64 array; if that takes more than half of the machine's memory, memory decides and not speed:
+    the sparse kernel runs where its couplings take less, stored bytes."""
+    array = 8 * size * size
+    if 2 * array > _memory():
+        return stored < array
+    return _sparse_is_faster(changed, size, spins)
+
+
 def _entries(couplings):
     """(row, column, value) of the nonzero couplings, row by row with ascending columns: the same arrays for an
     array and for a scipy.sparse CSR matrix with sorted columns and no stored zeros."""
     if hasattr(couplings, "tocsr"):
         return np.repeat(np.arange(couplings.shape[0]), np.diff(couplings.indptr)), couplings.indices, couplings.data
     row, col = np.nonzero(couplings)
-    return row, col, couplings[row, col]
+    return row, col, np.asarray(couplings[row, col], dtype=np.float64)
 
 
 def _spin_form(couplings):
@@ -210,12 +227,10 @@ def _spin_form(couplings):
     either form does not depend on the input format."""
     n = couplings.shape[0]
     given_sparse = hasattr(couplings, "tocsr")
-    if not given_sparse:
-        couplings = np.ascontiguousarray(couplings, dtype=np.float64)
     count = couplings.nnz if given_sparse else np.count_nonzero(couplings)
-    if _sparse_is_faster(count / n, n, spins=True):
+    if _use_sparse(count / n, n, True, 24 * count):   # the entries: 24 bytes per nonzero coupling
         return _entries(couplings)
-    return couplings.toarray() if given_sparse else couplings
+    return couplings.toarray() if given_sparse else np.ascontiguousarray(couplings, dtype=np.float64)
 
 
 def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
@@ -291,8 +306,6 @@ def _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, se
     """run() for categorical problems, on validated input (couplings as for _run_spins). Variables with one value
     never move and are left out."""
     given_sparse = hasattr(couplings, "tocsr")
-    if not given_sparse:
-        couplings = np.ascontiguousarray(couplings, dtype=np.float64)
     m = couplings.shape[0]
     multi = sizes > 1
     msizes = sizes[multi]
@@ -317,18 +330,22 @@ def _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, se
     width = msizes - 1                                                    # rows per variable
     if given_sparse:
         row, col, data = _entries(couplings)
+        count = len(data)
         pairs = np.unique(grp[row].astype(np.int64) * V + grp[col])       # coupled (variable, neighbour), as one number
     else:   # the variables with any coupling between their rows
-        some = np.logical_or.reduceat(np.logical_or.reduceat(couplings != 0.0, starts[:-1], axis=1), starts[:-1], axis=0)
+        nonzero = couplings != 0
+        count = np.count_nonzero(nonzero)
+        some = np.logical_or.reduceat(np.logical_or.reduceat(nonzero, starts[:-1], axis=1), starts[:-1], axis=0)
         pairs = np.flatnonzero(some)
+        del nonzero, some
     tables = int(np.sum(width[pairs // V] * width[pairs % V]))            # the sparse kernel stores these in full
-    sparse = _sparse_is_faster(tables / m, m, spins=False)
+    sparse = _use_sparse(tables / m, m, False, 8 * tables + 24 * count)   # the tables and the entries
     if sparse:
         if not given_sparse:
             row, col, data = _entries(couplings)
         stored = (starts.astype(np.int32),) + _coupled_variables(row, col, data, pairs, grp, starts)
-    elif given_sparse:
-        couplings = couplings.toarray()
+    else:
+        couplings = couplings.toarray() if given_sparse else np.ascontiguousarray(couplings, dtype=np.float64)
     rng = np.random.default_rng(seed)
     tenure = int(tabu_tenure * V)
     energy_best, cur_best = np.inf, None

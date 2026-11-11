@@ -249,6 +249,10 @@ The constants are fitted to timings of both kernels on one machine (Apple M4). F
 of the couplings nonzero from a few hundred spins up; for categorical variables, about a tenth of the value pairs
 coupled.
 
+Memory comes before speed. The array kernels need the couplings as an n × n float64 array, 8 n² bytes. If that is
+more than half of the machine's memory, the kernel whose couplings take less memory runs: the sparse one when its
+entries, 24 bytes per nonzero coupling, plus for categorical variables its tables, take less than the array.
+
 ## Usage
 
 `make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the four
@@ -278,7 +282,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as
 
 | parameter | what it is | default | theory |
 |---|---|---|---|
-| `couplings` | J, an n × n symmetric matrix with zero diagonal: an array or a `scipy.sparse` matrix | required | The format does not change the run: `run()` picks the array or the sparse kernels from the number of nonzero couplings (see Sparse couplings). The array kernels read a C-contiguous float64 array in place; any other input is converted once, a `scipy.sparse` matrix to n × n float64. |
+| `couplings` | J, an n × n symmetric matrix with zero diagonal: an array or a `scipy.sparse` matrix | required | The format does not change the run: `run()` picks the array or the sparse kernels from the number of nonzero couplings (see Sparse couplings). The array kernels read a C-contiguous float64 array in place; any other input is converted once, a `scipy.sparse` matrix to n × n float64. If that array would take more than half of the machine's memory, the kernel that needs less memory runs. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
