@@ -81,6 +81,24 @@ variable, so there is no penalty to set and no climb over one. Value 0 of each v
 has its own row of couplings, so a move reads the row of the value it leaves and of the value it enters, none for value
 0. With two values per variable that is one stored value and one row per move: exactly the spin problem.
 
+**Elimination.** Before the anneal, a categorical problem loses the values that no optimum needs. Value a of
+variable r is removed when another value b of r has
+
+```
+f(a) − f(b) + Σ_s min_c [ T_rs(a, c) − T_rs(b, c) ]  ≥  0
+```
+
+with f the fields, T_rs the couplings between the values of r and of s, the sum over the variables s coupled to r, and
+the minimum over the values c of s still allowed. The left side is the least that F(a) − F(b) can be, each neighbour
+taken at its worst for b. So b is at least as good as a in every state: any state that uses a has one of no higher
+energy that does not, and a state of the lowest energy always remains. With ≥ rather than >, values that are never
+better than another go too, duplicates included. A removed value leaves the minima of its variable's neighbours, which
+can make more values removable, so the test repeats until nothing changes.
+
+The anneal then runs on the values left, and variables left with one value drop out. There is nothing to set. How
+much goes depends on the problem: a value goes when its field costs more than its couplings can ever win back
+against some other value. Problems given as spins are not reduced: for a spin the test is |h_i| ≥ Σ_j |J_ij|.
+
 ## Compared with simulated annealing
 
 SA here follows Isakov et al.,
@@ -253,12 +271,36 @@ Memory comes before speed. The array kernels need the couplings as an n × n flo
 more than half of the machine's memory, the kernel whose couplings take less memory runs: the sparse one when its
 entries, 24 bytes per nonzero coupling, plus for categorical variables its tables, take less than the array.
 
+### Elimination
+
+One function, `pfa_native_eliminate.c`, reads both layouts of the couplings, the array and the tables of the sparse
+kernel: in either, the couplings of a value to the values of one neighbour are one stretch of memory.
+
+- **A failing pair is dropped early.** Most pairs (a, b) fail the test, so its sum is ordered to show that soon. It
+  starts at E(a) − E(b), the energies of the two values with every neighbour at its lowest allowed value: one sum per
+  value, not per pair, and never below the full sum. Each neighbour then lowers it, from its term in that state to
+  its minimum. Once below 0 it stays there, and the pair is dropped.
+- **The neighbour that decides is read first.** The neighbour that took a pair below 0 moves to the front of its
+  variable's order, where the next pairs meet it.
+- **Only what changed is tested again**: the variables with a neighbour that lost a value.
+- **No tolerance.** The comparison is the floating-point one, so two values that tie only up to rounding can both stay.
+- **The reduced problem.** The lowest value left of each variable becomes its value 0. With k_s that value of s,
+
+  ```
+  T'(a, c) = T(a, c) − T(a, k_s) − T(k_r, c) + T(k_r, k_s)
+  f'(a)    = G(a) − G(k_r),        G(a) = f(a) + Σ_s T(a, k_s)
+  ```
+
+  which changes the energy by a constant. The couplings of a variable left with one value are then in the fields.
+  `run()` picks the kernel again for the reduced problem.
+
 ## Usage
 
 `make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the four
 kernels: `pfa_native_spin.c` and `pfa_native_categorical.c` for couplings as an array, and `pfa_native_sparse_spin.c`
-and `pfa_native_sparse_categorical.c`, which draw from the tree of sums of `pfa_native_sums.c`. The first two use the
-one SIMD path that matches the machine; the sparse two are the same code on every path:
+and `pfa_native_sparse_categorical.c`, which draw from the tree of sums of `pfa_native_sums.c`; and
+`pfa_native_eliminate.c`. The first two use the one SIMD path that matches the machine; the rest is the same code on
+every path:
 
 | path | files | used on |
 |---|---|---|
@@ -284,7 +326,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as
 |---|---|---|---|
 | `couplings` | J, an n × n symmetric matrix with zero diagonal: an array or a `scipy.sparse` matrix | required | The format does not change the run: `run()` picks the array or the sparse kernels from the number of nonzero couplings (see Sparse couplings). The array kernels read a C-contiguous float64 array in place; any other input is converted once, a `scipy.sparse` matrix to n × n float64. If that array would take more than half of the machine's memory, the kernel that needs less memory runs. |
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
-| `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. |
+| `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. Values that no optimum needs are removed first (see Elimination). |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
 | `num_flips` | steps per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |

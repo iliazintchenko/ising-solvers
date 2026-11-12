@@ -68,6 +68,19 @@ _lib.pfa_sparse_categorical_anneal.argtypes = [
     _f64,  # per variable, a table: one line per value other than 0, its couplings to the neighbours' values
 ] + _cat_args[1:4] + _cat_args[5:6] + _cat_args[7:]
 _lib.pfa_sparse_categorical_anneal.restype = None
+_lib.pfa_categorical_eliminate.argtypes = [
+    _i32,  # first row of each variable, and the number of rows
+    ctypes.c_int,  # number of variables
+    _i32,  # where each variable's neighbours start
+    _i32,  # the neighbours: the variables it is coupled to
+    _i64,  # per neighbour, where its rows start in a line of the variable's couplings
+    _i64,  # where each variable's lines start
+    _i64,  # the length of a line of each variable
+    _f64,  # the lines: the tables of the sparse kernel, or the array of the array kernel
+    _f64,  # fields
+    np.ctypeslib.ndpointer(dtype=np.int8, ndim=1, flags="C_CONTIGUOUS"),  # per value, value 0 included: allowed (out)
+]
+_lib.pfa_categorical_eliminate.restype = ctypes.c_long
 _lib.pfa_categorical_prepare.argtypes = [
     _f64_2d,  # one-hot couplings over all slots
     _f64,  # one-hot fields
@@ -132,8 +145,11 @@ def run(
     adds nothing. Couplings between two values of the same variable must be 0.
     Every step changes one variable's value, chosen among all variables and
     values by the same rule. The tabu acts per variable, for tabu_tenure times
-    the number of variables steps. categorical_from_one_hot() converts the
-    one-hot form.
+    the number of variables steps. Before the anneal, values that another
+    value of the same variable is at least as good as, whatever the other
+    variables do, are removed (dead-end elimination): a state of the lowest
+    energy always remains. categorical_from_one_hot() converts the one-hot
+    form.
 
     Parameters:
         couplings (np.ndarray or scipy.sparse matrix): The couplings matrix for the system, such that couplings[i,j] is the coupling between spin_i and spin_j.
@@ -186,7 +202,8 @@ def run(
     fields = np.zeros(couplings.shape[0]) if fields is None else np.asarray(fields, dtype=np.float64)
     if sizes is not None:
         return _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
-    return _run_spins(_spin_form(couplings), fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
+    form = _spin_form(couplings, len(fields))
+    return _run_spins(form, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
 
 
 def _sparse_is_faster(changed, size, spins):
@@ -214,23 +231,39 @@ def _use_sparse(changed, size, spins, stored):
 
 def _entries(couplings):
     """(row, column, value) of the nonzero couplings, row by row with ascending columns: the same arrays for an
-    array and for a scipy.sparse CSR matrix with sorted columns and no stored zeros."""
+    array and for a scipy.sparse CSR matrix with sorted columns and no stored zeros. Entries are returned as given."""
+    if isinstance(couplings, tuple):
+        return couplings
     if hasattr(couplings, "tocsr"):
         return np.repeat(np.arange(couplings.shape[0]), np.diff(couplings.indptr)), couplings.indices, couplings.data
     row, col = np.nonzero(couplings)
     return row, col, np.asarray(couplings[row, col], dtype=np.float64)
 
 
-def _spin_form(couplings):
-    """The couplings of a spin problem as the kernel chosen for them takes them, from an array or a scipy.sparse CSR
-    matrix: a float64 array for the array kernel, or _entries() for the sparse kernel. Whatever is computed from
-    either form does not depend on the input format."""
-    n = couplings.shape[0]
-    given_sparse = hasattr(couplings, "tocsr")
-    count = couplings.nnz if given_sparse else np.count_nonzero(couplings)
+def _array(couplings, n):
+    """The couplings as an n x n C-contiguous float64 array: an array of that kind is returned as given."""
+    if isinstance(couplings, tuple):
+        out = np.zeros((n, n))
+        out[couplings[0], couplings[1]] = couplings[2]
+        return out
+    return couplings.toarray() if hasattr(couplings, "tocsr") else np.ascontiguousarray(couplings, dtype=np.float64)
+
+
+def _count(couplings):
+    """The number of nonzero couplings."""
+    if isinstance(couplings, tuple):
+        return len(couplings[2])
+    return couplings.nnz if hasattr(couplings, "tocsr") else np.count_nonzero(couplings)
+
+
+def _spin_form(couplings, n):
+    """The couplings of a problem of n spins as the kernel chosen for them takes them, from an array, a scipy.sparse
+    CSR matrix or entries: a float64 array for the array kernel, or _entries() for the sparse kernel. Whatever is
+    computed from either form does not depend on the input format."""
+    count = _count(couplings)
     if _use_sparse(count / n, n, True, 24 * count):   # the entries: 24 bytes per nonzero coupling
         return _entries(couplings)
-    return couplings.toarray() if given_sparse else np.ascontiguousarray(couplings, dtype=np.float64)
+    return _array(couplings, n)
 
 
 def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
@@ -303,55 +336,185 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
 
 
 def _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
-    """run() for categorical problems, on validated input (couplings as for _run_spins). Variables with one value
-    never move and are left out."""
-    given_sparse = hasattr(couplings, "tocsr")
-    m = couplings.shape[0]
+    """run() for categorical problems, on validated input (couplings as an array or a scipy.sparse CSR matrix).
+    Variables with one value never move and are left out, and so are the values that elimination removes."""
     multi = sizes > 1
-    msizes = sizes[multi]
-    V = len(msizes)
-    starts = np.concatenate(([0], np.cumsum(msizes - 1)))      # rows of variable r: starts[r] .. starts[r + 1] - 1
+    args = beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure
+    x = np.zeros(len(sizes), dtype=np.int64)
+    if not multi.any():
+        return x
+    form = _Form(couplings, sizes[multi])
+    alive = np.empty(form.starts[-1] + len(form.starts) - 1, dtype=np.int8)
+    if not _lib.pfa_categorical_eliminate(*form.lines, np.ascontiguousarray(fields), alive):
+        x[multi] = _anneal_categorical(form, fields, *args)
+        return x
+    couplings, fields, count, value = _reduced(form, fields, alive.astype(bool))
+    at = np.cumsum(count) - count          # where each variable's allowed values start in value
+    free = count > 1
+    if free.any():
+        at[free] += _anneal_categorical(_Form(couplings, count[free]), fields, *args)
+    x[multi] = value[at]
+    return x
+
+
+class _Form:
+    """The couplings of a categorical problem whose variables all have more than one value, as the kernel chosen
+    for them reads them. starts: rows of variable r are starts[r] .. starts[r + 1] - 1. sparse: whether the sparse
+    kernel runs it. couplings: _entries() for the sparse kernel, a float64 array for the array kernel. lines: how
+    both pfa_categorical_eliminate() and the sparse kernel find the couplings of a row to a neighbour's rows (see
+    pfa_native_eliminate.c): first row of each variable, number of variables, where each variable's neighbours
+    start, the neighbours, where a neighbour's rows start in a line, where each variable's lines start, the length
+    of its lines, and the lines, which are the sparse kernel's tables or the array itself."""
+
+    def __init__(self, couplings, sizes):
+        V = len(sizes)
+        width = sizes - 1                                                     # rows per variable
+        starts = np.concatenate(([0], np.cumsum(width)))
+        m = int(starts[-1])
+        grp = np.repeat(np.arange(V), width)
+        if isinstance(couplings, np.ndarray):   # the variables with any coupling between their rows
+            nonzero = couplings != 0
+            count = np.count_nonzero(nonzero)
+            some = np.logical_or.reduceat(np.logical_or.reduceat(nonzero, starts[:-1], axis=1), starts[:-1], axis=0)
+            pairs = np.flatnonzero(some)
+            del nonzero, some
+        else:
+            row, col, data = _entries(couplings)
+            count = len(data)
+            pairs = np.unique(grp[row].astype(np.int64) * V + grp[col])       # coupled (variable, neighbour), as one number
+        left, right = pairs // V, pairs % V
+        tables = int(np.sum(width[left] * width[right]))                      # the sparse kernel stores these in full
+        self.starts, self.grp = starts, grp.astype(np.int32)
+        self.sparse = _use_sparse(tables / m, m, False, 8 * tables + 24 * count)   # the tables and the entries
+        vptr = np.searchsorted(left, np.arange(V + 1))
+        if self.sparse:
+            self.couplings = _entries(couplings)
+            seg, line, rows, vals = _tables(*self.couplings, pairs, grp, starts)
+        else:
+            self.couplings = _array(couplings, m)
+            seg, line, rows, vals = starts[right], np.full(V, m), starts[:-1] * m, self.couplings.reshape(-1)
+        self.lines = (starts.astype(np.int32), V, vptr.astype(np.int32), right.astype(np.int32), seg.astype(np.int64),
+                      rows.astype(np.int64), line.astype(np.int64), vals)
+
+
+def _tables(row, col, data, pairs, grp, starts):
+    """Couplings between rows (row, col, data) -> full tables between coupled variables, as the sparse categorical
+    kernel reads them. pairs: the coupled (variable, neighbour) as variable * V + neighbour, ascending. Variable r's
+    table has one line per row of r, with the couplings to every row of its first neighbour, then of its second,
+    and so on. Returns where each neighbour's rows start in a line, the length of each variable's lines, where each
+    variable's table starts, and the tables."""
+    V = len(starts) - 1
+    width = np.diff(starts)                                            # rows per variable
+    left, right = pairs // V, pairs % V
+    vptr = np.searchsorted(left, np.arange(V + 1))
+    seg = np.cumsum(width[right]) - width[right]                       # where each neighbour's rows start in a line,
+    seg -= seg[vptr[left]]                                             # counted from the variable's first neighbour
+    line = np.bincount(left, weights=width[right], minlength=V).astype(np.int64)   # length of a line
+    rows = np.concatenate(([0], np.cumsum(width * line)[:-1]))
+    vals = np.zeros(int(np.sum(width * line)))
+    e = np.searchsorted(pairs, grp[row].astype(np.int64) * V + grp[col])
+    r = left[e]
+    vals[rows[r] + (row - starts[r]) * line[r] + seg[e] + col - starts[right[e]]] = data
+    return seg, line, rows, vals
+
+
+def _reduced(form, fields, alive):
+    """The problem of form on the allowed values (alive, per value with value 0 included, variable by variable), with
+    the energy changed by a constant. The lowest allowed value of each variable becomes its value 0: with k_s the
+    row of that value of s (no row if it is the old value 0, and its terms are 0), the couplings and fields are
+
+        T'(a, c) = T(a, c) - (T(a, k_s) + T(k_r, c)) + T(k_r, k_s)
+        f'(a) = G(a) - G(k_r),    G(a) = f(a) + sum over s of T(a, k_s)
+
+    Variables left with one value are left out: their couplings are in the fields. Returns the couplings (entries
+    or an array, as in form), the fields, the number of allowed values of every variable of form, and the old value
+    of each allowed value, variable by variable."""
+    starts = form.starts
+    V, m = len(starts) - 1, int(starts[-1])
+    width = np.diff(starts)
+    slot = starts[:-1] + np.arange(V)                    # where each variable's values start in alive
+    count = np.add.reduceat(alive.astype(np.int64), slot)
+    on = np.flatnonzero(alive)
+    value = on - np.repeat(slot, count)
+    k = np.where(value[np.cumsum(count) - count] > 0, on[np.cumsum(count) - count] - np.arange(V) - 1, -1)   # row k_r
+    is_k = np.zeros(m, dtype=bool)
+    is_k[k[k >= 0]] = True
+    keep = np.delete(alive, slot) & ~is_k                # the rows of the reduced problem
+    new = np.cumsum(keep) - 1                            # their new numbers
+    k_of = np.repeat(k, width)                           # per row: k of its variable
+    n = int(keep.sum())
+    out_fields = np.empty(n)
+    _, _, vptr, adj, _, rows, line, vals = form.lines
+    if form.sparse:
+        wide = width[adj]
+        to_row = np.arange(int(wide.sum())) - np.repeat(np.cumsum(wide) - wide - starts[adj], wide)   # row of each column
+        ends = np.concatenate(([0], np.cumsum(line)))
+        out = [np.empty(0, dtype=np.int64)], [np.empty(0, dtype=np.int64)], [np.empty(0)]
+    else:
+        to_row = np.arange(m)
+        out = np.zeros((n, n))
+    for r in np.flatnonzero(count > 1):
+        lo, hi = starts[r], starts[r + 1]
+        a = np.flatnonzero(keep[lo:hi])
+        if form.sparse:
+            table = vals[rows[r] : rows[r] + width[r] * line[r]].reshape(width[r], line[r])
+            cols = to_row[ends[r] : ends[r + 1]]
+        else:
+            table, cols = form.couplings[lo:hi], to_row
+        G = fields[lo:hi] + table[:, is_k[cols]].sum(axis=1)
+        c = np.flatnonzero(keep[cols])
+        h = np.flatnonzero(k_of[cols[c]] >= 0)                       # the columns whose variable has a k_s,
+        at_k = c[h] - (cols[c[h]] - k_of[cols[c[h]]])                # and the column of k_s
+        T = table[np.ix_(a, c)]
+        if k[r] >= 0:
+            own = table[k[r] - lo]                                   # T(k_r, .)
+            rest = np.flatnonzero(k_of[cols[c]] < 0)
+            T[:, h] = T[:, h] - (table[np.ix_(a, at_k)] + own[c[h]]) + own[at_k]
+            T[:, rest] -= own[c[rest]]
+            out_fields[new[lo + a]] = G[a] - G[k[r] - lo]
+        else:
+            T[:, h] -= table[np.ix_(a, at_k)]
+            out_fields[new[lo + a]] = G[a]
+        if form.sparse:
+            i, j = np.nonzero(T)
+            out[0].append(new[lo + a][i])
+            out[1].append(new[cols[c]][j])
+            out[2].append(T[i, j])
+        else:
+            out[new[lo + a[0]] : new[lo + a[-1]] + 1] = T           # c is every kept row
+    if form.sparse:
+        out = tuple(np.concatenate(x) for x in out)
+    return out, out_fields, count, value
+
+
+def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+    """The anneal of a categorical problem in the form of _Form: the value of each variable, 0 for its value 0."""
+    starts, grp, sparse, couplings = form.starts, form.grp, form.sparse, form.couplings
+    V, m = len(starts) - 1, int(starts[-1])
+    sizes = np.diff(starts) + 1
 
     def values(cur):   # current row of each variable (-1: value 0) -> the value of every variable
-        x = np.zeros(len(sizes), dtype=np.int64)
-        x[multi] = np.where(cur < 0, 0, cur - starts[:-1] + 1)
-        return x
+        return np.where(cur < 0, 0, cur - starts[:-1] + 1)
 
-    if np.all(msizes == 2):
+    if np.all(sizes == 2):
         # x = (s + 1) / 2: the spin problem with couplings C and fields 2 f + C 1 has 4 times the energy (plus a
         # constant), so it runs at beta / 4
-        form = _spin_form(couplings)
-        sums = np.bincount(form[0], weights=form[2], minlength=m) if isinstance(form, tuple) else form.sum(axis=1)
-        spins = _run_spins(form, 2.0 * fields + sums, beta_max / 4.0, num_flips, num_reps, seed, tabu_lambda,
+        spin = _spin_form(couplings, m)
+        sums = np.bincount(spin[0], weights=spin[2], minlength=m) if isinstance(spin, tuple) else spin.sum(axis=1)
+        spins = _run_spins(spin, 2.0 * fields + sums, beta_max / 4.0, num_flips, num_reps, seed, tabu_lambda,
                            tabu_tenure)
         return values(np.where(spins > 0, np.arange(V), -1))
 
-    grp = np.repeat(np.arange(V), msizes - 1).astype(np.int32)
-    width = msizes - 1                                                    # rows per variable
-    if given_sparse:
-        row, col, data = _entries(couplings)
-        count = len(data)
-        pairs = np.unique(grp[row].astype(np.int64) * V + grp[col])       # coupled (variable, neighbour), as one number
-    else:   # the variables with any coupling between their rows
-        nonzero = couplings != 0
-        count = np.count_nonzero(nonzero)
-        some = np.logical_or.reduceat(np.logical_or.reduceat(nonzero, starts[:-1], axis=1), starts[:-1], axis=0)
-        pairs = np.flatnonzero(some)
-        del nonzero, some
-    tables = int(np.sum(width[pairs // V] * width[pairs % V]))            # the sparse kernel stores these in full
-    sparse = _use_sparse(tables / m, m, False, 8 * tables + 24 * count)   # the tables and the entries
     if sparse:
-        if not given_sparse:
-            row, col, data = _entries(couplings)
-        stored = (starts.astype(np.int32),) + _coupled_variables(row, col, data, pairs, grp, starts)
-    else:
-        couplings = couplings.toarray() if given_sparse else np.ascontiguousarray(couplings, dtype=np.float64)
+        row, col, data = couplings
+        first, _, vptr, adj, _, rows, _, vals = form.lines
+        stored = first, vptr, adj, rows, vals
     rng = np.random.default_rng(seed)
     tenure = int(tabu_tenure * V)
     energy_best, cur_best = np.inf, None
     for rep in range(num_reps):
         if rep == 0:
-            v = (rng.random(V) * msizes).astype(np.int64)                 # a uniformly random value per variable
+            v = (rng.random(V) * sizes).astype(np.int64)                  # a uniformly random value per variable
             cur = np.where(v == 0, -1, starts[:-1] + v - 1).astype(np.int32)
             beta_start = 0.0
         else:
@@ -386,27 +549,6 @@ def _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, se
             energy_best, cur_best = energy_min_c.value, best_cur
 
     return values(cur_best)
-
-
-def _coupled_variables(row, col, data, pairs, grp, starts):
-    """Couplings between rows (row, col, data) -> full tables between coupled variables, as the sparse categorical
-    kernel reads them: where each variable's neighbours start, the neighbours, where each variable's table starts,
-    and the tables. pairs: the coupled (variable, neighbour) as variable * V + neighbour, ascending. Variable r's
-    table has one line per row of r, with the couplings to every row of its first neighbour, then of its second,
-    and so on."""
-    V = len(starts) - 1
-    width = np.diff(starts)                                            # rows per variable
-    left, right = pairs // V, pairs % V
-    vptr = np.searchsorted(left, np.arange(V + 1))
-    seg = np.cumsum(width[right]) - width[right]                       # where each neighbour's rows start in a line,
-    seg -= seg[vptr[left]]                                             # counted from the variable's first neighbour
-    line = np.bincount(left, weights=width[right], minlength=V).astype(np.int64)   # length of a line
-    rows = np.concatenate(([0], np.cumsum(width * line)[:-1]))
-    vals = np.zeros(int(np.sum(width * line)))
-    e = np.searchsorted(pairs, grp[row].astype(np.int64) * V + grp[col])
-    r = left[e]
-    vals[rows[r] + (row - starts[r]) * line[r] + seg[e] + col - starts[right[e]]] = data
-    return vptr.astype(np.int32), right.astype(np.int32), rows.astype(np.int64), vals
 
 
 def _one_hot_layout(groups):

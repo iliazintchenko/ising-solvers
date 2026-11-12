@@ -4,6 +4,7 @@
 //   pfa_native_categorical.c          categorical variables: pfa_categorical_anneal()
 //   pfa_native_sparse_spin.c          spins, sparse couplings: pfa_sparse_anneal()
 //   pfa_native_sparse_categorical.c   categorical variables, sparse couplings: pfa_sparse_categorical_anneal()
+//   pfa_native_eliminate.c            categorical variables: pfa_categorical_eliminate(), before the anneal
 // Each holds its anneal loop. The first two include their pass over memory for the chosen path,
 // pfa_native_spin_<path>.c or pfa_native_categorical_<path>.c:
 //   sve      vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
@@ -117,3 +118,4 @@ const char *pfa_native_simd_path(void) { return SIMD_PATH; }
 #include "pfa_native_sums.c"
 #include "pfa_native_sparse_spin.c"
 #include "pfa_native_sparse_categorical.c"
+#include "pfa_native_eliminate.c"
