@@ -67,14 +67,19 @@ static inline int cat_pass(double *F, const float *S, const double *ra, const do
 // one[r]: the slot of a two-value variable r, else -1.
 ANNEAL_ATTR static void cat_loop(const double *Jt, double *F, int m, int V, const int *grp, int *cur,
                                  const float *noise, long nmoves, double beta_start, double beta_max, double *E_io,
-                                 double *best_io, int *best_cur, uint64_t seed, double lambda, int tenure, double *pen,
-                                 long *last, int *recent, float *o, float *S, const int *multi,
-                                 const int *mfirst, int nmulti, const int *one, const int *blk, const double *zero) {
+                                 double *best_io, int *best_cur, double *late_io, int *late_cur, uint64_t seed,
+                                 double lambda, int tenure, double *pen, long *last, int *recent, float *o, float *S,
+                                 const int *multi, const int *mfirst, int nmulti, const int *one, const int *blk,
+                                 const double *zero) {
     double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nmoves - 1);
     uint64_t x = seed | 1;
     const double *ra = 0, *rb = zero;   // rows of the last move, applied in the next pass (none yet: add zeros)
-    int at_best = 0;                    // the current state is the best one and best_cur does not hold it yet
+    int at_best = 0;                    // the current state is the best one of this half, not yet in best_cur
     for (long t = 0; t < nmoves; t++) {
+        if (t == nmoves / 2) {   // the second half starts: its lowest state so far is the current one
+            if (at_best) __builtin_memcpy(best_cur, cur, sizeof(int) * V);
+            *best_io = best; best = E; best_cur = late_cur; at_best = 1;
+        }
         beta += dbeta;
         x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
         const float *g = noise + (int)(((x * 2685821657736338717ULL) >> 32) * (uint64_t)m >> 32);
@@ -103,15 +108,16 @@ ANNEAL_ATTR static void cat_loop(const double *Jt, double *F, int m, int V, cons
     if (at_best) __builtin_memcpy(best_cur, cur, sizeof(int) * V);
     for (int r = 0; r < V; r++) if (one[r] >= 0) F[one[r]] += (double)S[one[r]] * pen[r];   // leave the true fields
     for (int k = 0; k < m; k++) F[k] = cat_update(F[k], ra, rb, k);                         // of the final state
-    *E_io = E; *best_io = best;
+    *E_io = E; *late_io = best;
 }
 
 // Jt: m x m couplings between slots; F: m fields (updated in place); grp: variable of each slot, 0..V-1, grouped;
 // cur: V current slots (updated in place); noise: m noise values stored twice; best_cur: V slots (in: the initial
-// state, out: the best). As pfa_native_anneal otherwise.
+// state, out: the lowest of the first half of the moves); late_cur: V slots (out: the lowest of the second half).
+// As pfa_native_anneal otherwise.
 void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int *grp, int *cur, const float *noise,
                             long nmoves, double beta_start, double beta_max, double *E_io, double *best_io,
-                            int *best_cur, uint64_t seed, double lambda, int tenure) {
+                            int *best_cur, double *late_io, int *late_cur, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(V, sizeof(double)), *zero = calloc(m, sizeof(double));
     float *o = calloc(V + 64, sizeof(float)), *S = malloc(sizeof(float) * m);
     long *last = malloc(sizeof(long) * V);
@@ -133,8 +139,8 @@ void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int
         for (int i = 0; i < 8; i++) spins &= one[gj[i]] >= 0;
         blk[j] = gj[0] == gj[7] ? gj[0] : spins ? V : -1;
     }
-    cat_loop(Jt, F, m, V, grp, cur, noise, nmoves, beta_start, beta_max, E_io, best_io, best_cur, seed, lambda,
-             tenure, pen, last, recent, o, S, multi, mfirst, nmulti, one, blk, zero);
+    cat_loop(Jt, F, m, V, grp, cur, noise, nmoves, beta_start, beta_max, E_io, best_io, best_cur, late_io, late_cur,
+             seed, lambda, tenure, pen, last, recent, o, S, multi, mfirst, nmulti, one, blk, zero);
     free(pen); free(o); free(S); free(zero); free(last); free(recent); free(multi); free(mfirst); free(one); free(blk);
 }
 

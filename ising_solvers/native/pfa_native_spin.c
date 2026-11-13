@@ -41,14 +41,19 @@ static inline void tail_pass(const double *Ji, double *phi, const float *s, cons
 
 // pen[j]: the shift c_j currently applied to phi[j] (0 when j is not tabu); last[j]: step of j's last flip;
 // recent[t % tenure]: the spin flipped at step t.
+// The lowest state is kept for each half of the flips: sbest for the first, slate for the second.
 ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, const float *noise, int n, long nflips,
                                     double beta_start, double beta_max, int bi, double *E_io, double *best_io,
-                                    float *sbest, uint64_t seed, double lambda, int tenure, double *pen, long *last,
-                                    int *recent) {
+                                    float *sbest, double *late_io, float *slate, uint64_t seed, double lambda,
+                                    int tenure, double *pen, long *last, int *recent) {
     double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nflips - 1);
     uint64_t x = seed | 1;   // xorshift64* generator for the offsets
-    int at_best = 0;         // the current state is the best one and sbest does not hold it yet
+    int at_best = 0;         // the current state is the best one of this half and sbest does not hold it yet
     for (long t = 0; t < nflips; t++) {
+        if (t == nflips / 2) {   // the second half starts: its lowest state so far is the current one
+            if (at_best) __builtin_memcpy(sbest, s, sizeof(float) * n);
+            *best_io = best; best = E; sbest = slate; at_best = 1;
+        }
         int i = bi; double si = (double)s[i];
         double phii = phi[i] + si * pen[i];   // true local field of i
         double dE = -4.0 * si * phii;
@@ -71,21 +76,23 @@ ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, cons
     }
     if (at_best) __builtin_memcpy(sbest, s, sizeof(float) * n);
     for (int j = 0; j < n; j++) phi[j] += (double)s[j] * pen[j];   // leave the true local fields
-    *E_io = E; *best_io = best;
+    *E_io = E; *late_io = best;
 }
 
 // J: the n x n couplings, row-major; phi: n local fields / 2 (updated in place); s: n spins as float32 +-1
-// (updated in place); noise: the noise vector stored twice (2n floats); sbest: n floats (out).
+// (updated in place); noise: the noise vector stored twice (2n floats). The lowest state of the first half of the
+// flips: sbest (n floats, in: the initial spins) and *best_io (in: the initial energy); of the second half, the
+// state it starts from included: slate and *late_io (out).
 // beta rises linearly from beta_start to beta_max; seed: for the random noise offsets; tabu: penalty lambda in
 // temperatures for the last tenure flips (tenure 0: no tabu).
 void pfa_native_anneal(const double *J, double *phi, float *s, const float *noise, int n,
                        long nflips, double beta_start, double beta_max, int bi, double *E_io, double *best_io,
-                       float *sbest, uint64_t seed, double lambda, int tenure) {
+                       float *sbest, double *late_io, float *slate, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(n, sizeof(double));
     long *last = malloc(sizeof(long) * n);
     int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));
     for (int j = 0; j < n; j++) last[j] = -1;
-    anneal_loop(J, phi, s, noise, n, nflips, beta_start, beta_max, bi, E_io, best_io, sbest, seed, lambda, tenure, pen,
-                last, recent);
+    anneal_loop(J, phi, s, noise, n, nflips, beta_start, beta_max, bi, E_io, best_io, sbest, late_io, slate, seed, lambda,
+                tenure, pen, last, recent);
     free(pen); free(last); free(recent);
 }

@@ -25,8 +25,10 @@ _lib.pfa_native_anneal.argtypes = [
     ctypes.c_double,  # beta_max
     ctypes.c_int,  # index of the first spin to flip
     ctypes.POINTER(ctypes.c_double),  # energy (in: initial, out: final)
-    ctypes.POINTER(ctypes.c_double),  # lowest energy (in: initial, out: lowest seen)
-    _f32,  # spins of the lowest energy state (out)
+    ctypes.POINTER(ctypes.c_double),  # lowest energy of the first half of the flips (in: initial)
+    _f32,  # spins of that state (in: initial)
+    ctypes.POINTER(ctypes.c_double),  # lowest energy of the second half (out)
+    _f32,  # spins of that state (out)
     ctypes.c_uint64,  # seed for the per-step noise offsets
     ctypes.c_double,  # tabu penalty lambda, in temperatures
     ctypes.c_int,  # tabu tenure, in flips
@@ -44,8 +46,10 @@ _lib.pfa_categorical_anneal.argtypes = [
     ctypes.c_double,  # beta at the start of the ramp
     ctypes.c_double,  # beta_max
     ctypes.POINTER(ctypes.c_double),  # energy (in: initial, out: final)
-    ctypes.POINTER(ctypes.c_double),  # lowest energy (in: initial, out: lowest seen)
-    _i32,  # rows of the lowest energy state (out)
+    ctypes.POINTER(ctypes.c_double),  # lowest energy of the first half of the moves (in: initial)
+    _i32,  # rows of that state (in: initial)
+    ctypes.POINTER(ctypes.c_double),  # lowest energy of the second half (out)
+    _i32,  # rows of that state (out)
     ctypes.c_uint64,  # seed for the per-step noise offsets
     ctypes.c_double,  # tabu penalty lambda, in temperatures
     ctypes.c_int,  # tabu tenure, in moves
@@ -81,6 +85,14 @@ _lib.pfa_categorical_eliminate.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.int8, ndim=1, flags="C_CONTIGUOUS"),  # per value, value 0 included: allowed (out)
 ]
 _lib.pfa_categorical_eliminate.restype = ctypes.c_long
+# the folds: the first state takes from the second every group of variables that the second has lower (in place),
+# and the energy change is returned
+_lib.pfa_spin_fold.argtypes = [_f64_2d, _f64, ctypes.c_int, _f32, _f32]   # couplings, fields, spins, two states
+_lib.pfa_spin_fold.restype = ctypes.c_double
+_lib.pfa_sparse_spin_fold.argtypes = _lib.pfa_sparse_anneal.argtypes[:3] + [_f64, ctypes.c_int, _f32, _f32]
+_lib.pfa_sparse_spin_fold.restype = ctypes.c_double
+_lib.pfa_categorical_fold.argtypes = _lib.pfa_categorical_eliminate.argtypes[:9] + [_i32, _i32]   # two states, as rows
+_lib.pfa_categorical_fold.restype = ctypes.c_double
 _lib.pfa_categorical_prepare.argtypes = [
     _f64_2d,  # one-hot couplings over all slots
     _f64,  # one-hot fields
@@ -121,9 +133,15 @@ def run(
     sampling, while beta rises linearly to beta_max. For the tabu_tenure * n
     flips after a spin flips, its dE is raised by tabu_lambda temperatures at
     the time of its flip (a tabu). The first repetition starts from random
-    spins at beta = 0; repetition k restarts from the best state found so
-    far, with beta ramping up from (k - 1) / (num_reps - 1) * beta_max, so
-    the restarts cool. Compiled to native code on one core.
+    spins at beta = 0; each later one restarts from the best state so far,
+    with beta ramping up from c / (num_reps - 1) * beta_max, c the number of
+    repetitions so far that did not lower the best energy, so the restarts
+    cool as they stop paying. After each repetition the best state takes
+    from the repetition's lowest states (one per half of its flips) every
+    group of spins that they have lower: the spins on which two states
+    differ fall into groups not coupled to each other, and each group is
+    taken from the state where it costs less. Compiled to native code on
+    one core.
 
     The couplings are an array or a scipy.sparse matrix; the format does not
     change the run. run() picks the kernel from the number of nonzero
@@ -157,14 +175,14 @@ def run(
         sizes (np.ndarray, optional): For categorical problems, the number of values of each variable. Defaults to None.
         beta_max (float): The maximum inverse temperature. Defaults to 1.0.
         num_flips (int): Steps per repetition, each flipping a spin or changing one variable's value. Defaults to 1000.
-        num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far. Defaults to 1.
+        num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far, which takes the parts each repetition has lower. Defaults to 1.
         seed (int): Seed for the random number generator
         tabu_lambda (float): Tabu penalty on a just-flipped spin, in temperatures. Defaults to 3.0;
             rarely worth changing.
         tabu_tenure (float): How long a spin stays tabu, as a fraction of n flips; 0 turns the tabu
             off. Defaults to 0.25; rarely worth changing.
     Returns:
-        np.ndarray: The lowest-energy state over all repetitions: +-1 spins, or with sizes the value of each variable.
+        np.ndarray: The lowest-energy state found: +-1 spins, or with sizes the value of each variable.
     Raises:
         ValueError: If input parameters are invalid.
     """
@@ -199,7 +217,7 @@ def run(
         raise ValueError("tabu_lambda must be non-negative")
     if not 0.0 <= tabu_tenure <= 1.0:
         raise ValueError("tabu_tenure must be between 0 and 1")
-    fields = np.zeros(couplings.shape[0]) if fields is None else np.asarray(fields, dtype=np.float64)
+    fields = np.zeros(couplings.shape[0]) if fields is None else np.ascontiguousarray(fields, dtype=np.float64)
     if sizes is not None:
         return _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
     form = _spin_form(couplings, len(fields))
@@ -266,6 +284,19 @@ def _spin_form(couplings, n):
     return _array(couplings, n)
 
 
+def _folded(fold, states):
+    """The lowest of the states, as (energy, state) pairs, after it has taken from the others every group of
+    variables that one of them has lower (fold(a, b) does that for a from b and returns the energy change), going
+    round until its energy no longer falls: its energy and the state."""
+    energy, state = min(states, key=lambda pair: pair[0])
+    others = [other for _, other in states if other is not state]
+    while True:
+        lower = energy + sum(fold(state, other) for other in others)
+        if not lower < energy:
+            return energy, state
+        energy = lower
+
+
 def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
     """run() for spins, on validated input, with the couplings as _spin_form() returns them."""
     sparse = isinstance(couplings, tuple)
@@ -277,9 +308,13 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
     tenure = int(tabu_tenure * n)
 
     rng = np.random.default_rng(seed)
+    if sparse:
+        fold = lambda a, b: _lib.pfa_sparse_spin_fold(*stored, fields, n, a, b)
+    else:
+        fold = lambda a, b: _lib.pfa_spin_fold(couplings, fields, n, a, b)
 
-    energy_best = np.inf
     spins_best = None
+    stale = 0   # repetitions so far that did not lower the best energy
 
     for rep in range(num_reps):
         if rep == 0:
@@ -287,7 +322,7 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
             beta_start = 0.0
         else:
             spins = spins_best.astype(np.float64)
-            beta_start = beta_max * rep / (num_reps - 1)   # restarts cool: from near 0 to beta_max at the last
+            beta_start = beta_max * stale / (num_reps - 1)   # restarts cool: one step per repetition that brought nothing
         if sparse:
             coupled = np.bincount(row, weights=data * spins[col], minlength=n)   # couplings @ spins
             energy = 0.5 * spins @ coupled + fields @ spins
@@ -296,13 +331,14 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
             energy = get_energy(spins, couplings, fields)
         half_fields = 0.5 * (fields + coupled)
         spins_f32 = spins.astype(np.float32)
-        spins_min = spins_f32.copy()
+        spins_first, spins_late = spins_f32.copy(), np.empty(n, dtype=np.float32)
         energy_c = ctypes.c_double(energy)
-        energy_min_c = ctypes.c_double(energy)
+        first_c, late_c = ctypes.c_double(energy), ctypes.c_double()
+        lowest = ctypes.byref(first_c), spins_first, ctypes.byref(late_c), spins_late
         if sparse:
             _lib.pfa_sparse_anneal(
                 *stored, half_fields, spins_f32, n, num_flips, beta_start, beta_max, ctypes.byref(energy_c),
-                ctypes.byref(energy_min_c), spins_min, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
+                *lowest, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
             )
         else:
             noise_vec = -np.log(-np.log(rng.random(n)))
@@ -321,16 +357,17 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
                 beta_max,
                 first,
                 ctypes.byref(energy_c),
-                ctypes.byref(energy_min_c),
-                spins_min,
+                *lowest,
                 offsets_seed,
                 tabu_lambda,
                 tenure,
             )
 
-        if energy_min_c.value < energy_best:
-            energy_best = energy_min_c.value
-            spins_best = spins_min
+        states = [(first_c.value, spins_first), (late_c.value, spins_late)]
+        if rep:
+            states.append((energy, spins_best))
+        energy_new, spins_best = _folded(fold, states)
+        stale += rep == 0 or not energy_new < energy
 
     return spins_best.astype(np.int8)
 
@@ -511,7 +548,10 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
         stored = first, vptr, adj, rows, vals
     rng = np.random.default_rng(seed)
     tenure = int(tabu_tenure * V)
-    energy_best, cur_best = np.inf, None
+    fields = np.ascontiguousarray(fields, dtype=np.float64)
+    fold = lambda a, b: _lib.pfa_categorical_fold(*form.lines, fields, a, b)
+    cur_best = None
+    stale = 0   # repetitions so far that did not lower the best energy
     for rep in range(num_reps):
         if rep == 0:
             v = (rng.random(V) * sizes).astype(np.int64)                  # a uniformly random value per variable
@@ -519,7 +559,7 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
             beta_start = 0.0
         else:
             cur = cur_best.copy()
-            beta_start = beta_max * rep / (num_reps - 1)
+            beta_start = beta_max * stale / (num_reps - 1)
         on = cur[cur >= 0]
         if sparse:   # from the entries, so that the input format plays no part
             taken = np.zeros(m, dtype=bool)
@@ -530,23 +570,27 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
         else:
             F = fields + couplings[:, on].sum(axis=1)
             energy = fields[on].sum() + 0.5 * couplings[np.ix_(on, on)].sum()
-        best_cur = cur.copy()
+        cur_first, cur_late = cur.copy(), np.empty(V, dtype=np.int32)
         energy_c = ctypes.c_double(energy)
-        energy_min_c = ctypes.c_double(energy)
+        first_c, late_c = ctypes.c_double(energy), ctypes.c_double()
+        lowest = ctypes.byref(first_c), cur_first, ctypes.byref(late_c), cur_late
         if sparse:
             _lib.pfa_sparse_categorical_anneal(
-                *stored, F, m, V, cur, num_flips, beta_start, beta_max, ctypes.byref(energy_c),
-                ctypes.byref(energy_min_c), best_cur, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
+                *stored, F, m, V, cur, num_flips, beta_start, beta_max, ctypes.byref(energy_c), *lowest,
+                int(rng.integers(1, 2**63)), tabu_lambda, tenure,
             )
         else:
             noise_vec = -np.log(-np.log(rng.random(m)))
             noise_buffer = np.concatenate((noise_vec, noise_vec)).astype(np.float32)
             _lib.pfa_categorical_anneal(
                 couplings, F, m, V, grp, cur, noise_buffer, num_flips, beta_start, beta_max, ctypes.byref(energy_c),
-                ctypes.byref(energy_min_c), best_cur, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
+                *lowest, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
             )
-        if energy_min_c.value < energy_best:
-            energy_best, cur_best = energy_min_c.value, best_cur
+        states = [(first_c.value, cur_first), (late_c.value, cur_late)]
+        if rep:
+            states.append((energy, cur_best))
+        energy_new, cur_best = _folded(fold, states)
+        stale += rep == 0 or not energy_new < energy
 
     return values(cur_best)
 

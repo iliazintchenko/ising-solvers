@@ -4,16 +4,16 @@
 //   - The next spin is drawn from a tree of sums (pfa_native_sums.c) with probability proportional to
 //     exp(beta x_j), x_j = 4 s_j phi_j = -dE_j, the tabu penalty folded into phi as in the spin kernel. Only the
 //     neighbours, the flipped spin and a spin leaving the tabu list get a new x_j.
-//   - The best state is kept up to date from a list of the spins flipped since it was last written.
+//   - The lowest state of each half is kept up to date from a list of the spins flipped since it was last written.
 
 // pen, last, recent: as in the spin kernel. moved: spins flipped since sbest last held the state.
 static void sparse_loop(const int64_t *ptr, const int *idx, const double *val, double *phi, float *s, int n,
                         long nflips, double beta_start, double beta_max, double *E_io, double *best_io, float *sbest,
-                        uint64_t seed, double lambda, int tenure, double *pen, long *last, int *recent, int *moved,
-                        Sums *sums) {
+                        double *late_io, float *slate, uint64_t seed, double lambda, int tenure, double *pen,
+                        long *last, int *recent, int *moved, Sums *sums) {
     double E = *E_io, best = *best_io, beta = beta_start, dbeta = (beta_max - beta_start) / (double)(nflips - 1);
     uint64_t rng = seed | 1;
-    int at_best = 0;     // the current state is the best one and sbest does not hold it yet
+    int at_best = 0;     // the current state is the best one of this half and sbest does not hold it yet
     long nmoved = 0;     // more than n: too many to list, copy the state
 #define KEEP_BEST { \
         if (nmoved > n) __builtin_memcpy(sbest, s, sizeof(float) * n); \
@@ -22,6 +22,11 @@ static void sparse_loop(const int64_t *ptr, const int *idx, const double *val, d
 #define NEW_X(J) { sums->x[J] = 4.0 * (double)s[J] * phi[J]; sums_refresh(sums, J, (J) + 1); }
     for (int j = 0; j < n; j++) sums->x[j] = 4.0 * (double)s[j] * phi[j];
     for (long t = 0; t < nflips; t++) {
+        if (t == nflips / 2) {   // the second half starts: its lowest state so far is the current one
+            if (at_best) KEEP_BEST
+            *best_io = best; best = E; sbest = slate;
+            __builtin_memcpy(sbest, s, sizeof(float) * n); nmoved = 0;
+        }
         beta += dbeta;
         const int i = sums_draw(sums, beta, &rng);
         const double si = (double)s[i];
@@ -56,23 +61,22 @@ static void sparse_loop(const int64_t *ptr, const int *idx, const double *val, d
 #undef KEEP_BEST
 #undef NEW_X
     for (int j = 0; j < n; j++) phi[j] += (double)s[j] * pen[j];   // leave the true local fields
-    *E_io = E; *best_io = best;
+    *E_io = E; *late_io = best;
 }
 
-// ptr, idx, val: the couplings by row, row i in idx/val[ptr[i] .. ptr[i + 1]); sbest: n floats (in: the initial
-// spins, out: the best); seed: for the draws. No noise buffer and no first spin; everything else as
-// pfa_native_anneal.
+// ptr, idx, val: the couplings by row, row i in idx/val[ptr[i] .. ptr[i + 1]); seed: for the draws. No noise buffer
+// and no first spin; everything else as pfa_native_anneal.
 void pfa_sparse_anneal(const int64_t *ptr, const int *idx, const double *val, double *phi, float *s, int n,
                        long nflips, double beta_start, double beta_max, double *E_io, double *best_io, float *sbest,
-                       uint64_t seed, double lambda, int tenure) {
+                       double *late_io, float *slate, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(n, sizeof(double));
     long *last = malloc(sizeof(long) * n);
     int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1)), *moved = malloc(sizeof(int) * n);
     Sums sums;
     sums_new(&sums, n);
     for (int j = 0; j < n; j++) last[j] = -1;
-    sparse_loop(ptr, idx, val, phi, s, n, nflips, beta_start, beta_max, E_io, best_io, sbest, seed, lambda, tenure,
-                pen, last, recent, moved, &sums);
+    sparse_loop(ptr, idx, val, phi, s, n, nflips, beta_start, beta_max, E_io, best_io, sbest, late_io, slate, seed,
+                lambda, tenure, pen, last, recent, moved, &sums);
     sums_free(&sums);
     free(pen); free(last); free(recent); free(moved);
 }

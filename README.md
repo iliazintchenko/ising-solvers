@@ -56,17 +56,56 @@ keeps the chain moving between low-energy states instead of re-flipping the same
 `tabu_tenure`. The tabu breaks detailed balance, which an optimizer doesn't need. It roughly doubles the best
 `beta_max`.
 
-**Repetitions.** Run 1 of R starts from random spins at β = 0. Each later run starts from the best state found so
-far, with fresh noise and β starting partway up the ramp:
+**Repetitions.** Run 1 of R starts from random spins at β = 0. Each later run starts from the best state so far,
+with fresh noise and β starting partway up the ramp:
 
 ```
-run 1:  random spins         β: 0                      → beta_max
-run k:  best state so far    β: (k−1)/(R−1)·beta_max   → beta_max
+run 1:  random spins         β: 0                  → beta_max
+run k:  best state so far    β: c/(R−1)·beta_max   → beta_max
 ```
 
-The runs form an outer anneal: each restart reheats the best state less than the one before. Early restarts are hot
-enough to leave its basin and search widely; late ones refine it. The restarts are `beta_max`/(R−1) apart in β, so
-the outer anneal pays most with many runs.
+where c counts the earlier runs that did not lower the best energy. The runs form an outer anneal: a restart reheats
+the best state, at first hot enough to leave its basin and search widely, later only enough to refine it. The starting
+β rises by one step of `beta_max`/(R−1) each time a run brings nothing, so the restarts stay hot for as long as hot
+restarts pay.
+
+**Recombination.** A run that ends above the best state can still have part of the system lower. Take two states a
+and b, and the spins on which they differ. Taking spins i and j from b changes the energy by
+
+```
+Δ_i + Δ_j + 4 J_ij a_i a_j
+```
+
+with Δ_i the change of taking i alone: the two choices are independent unless J_ij ≠ 0. So the differing spins fall
+into groups, connected through nonzero couplings, and no coupling joins two groups. Taking a whole group G from b
+changes the energy by
+
+```
+Δ(G) = Σ_{i ∈ G} Δ_i + Σ_{i < j ∈ G} 4 J_ij a_i a_j
+```
+
+whatever is taken elsewhere, so a takes every group with Δ(G) < 0. That is the lowest of the 2^g states that have
+each of the g groups from a or from b, found in one pass and never above either. For categorical variables r and s
+with values a_r, b_r and a_s, b_s the two choices are independent unless
+
+```
+T(a_r, a_s) − T(a_r, b_s) − T(b_r, a_s) + T(b_r, b_s) ≠ 0
+```
+
+with T the couplings between their values: two coupled variables can still be in different groups.
+
+After every run, the best state takes the groups that the run has lower, from its lowest state in each half of its
+flips. In the first half of a restart that is usually the state it started from; in the second it is where the
+reheated chain settled, a different state of low energy. A run that would have been discarded now gives its good
+parts, and brings nothing only when the best energy stays where it was.
+
+How much this gives depends on how two low states differ. If every pair is coupled, or the states differ on so many
+spins that the groups merge, there is one group and the lower state is kept, as without recombination. If the
+couplings are sparse and fields or a few strong couplings hold most spins in place, low states differ in many small
+groups, and the best state improves group by group. On problems of that kind (side-chain packing, MAX-2-SAT, sparse
+glasses with fields or with couplings on several scales), 10 and 30 runs ended lower than without recombination in 82
+of 84 trials. On dense problems and a random sparse glass with equal couplings and no fields, the results stayed
+within the spread between seeds.
 
 **Categorical variables.** Often a variable takes exactly one of several values. Written as spins, that is a one-hot
 group, which every single flip breaks. Given the number of values of each variable, each step instead changes one
@@ -203,8 +242,8 @@ sparse kernels instead (see Sparse couplings). The tricks of the array kernels:
 - **Tabu for free.** The penalty, c_i = λ / (4β_i) in score units, is folded into the stored field,
   φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and removed when i leaves the list or flips again. The pass
   reads nothing extra; the anneal loop adds and removes shifts at O(1) per flip.
-- **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The best state is copied only when the
-  anneal steps up from a new low, so a descent through many new lows costs one copy.
+- **Energy tracked, not computed.** E += ΔE_i = −4 s_i φ_i at each flip, O(1). The lowest state of each half of a run
+  is copied only when the anneal steps up from a new low, so a descent through many new lows costs one copy.
 - **Categorical moves.** One pass per move, as for spins: every value k other than 0 is one move, scored in float32
 
   ```
@@ -253,7 +292,8 @@ different run on the sparse kernels than on the array kernels.
 - **Categorical.** Couplings are kept as full tables between coupled variables. A move of variable r updates F for
   the values of r's neighbours only, and those values get new weights, since o changes with the field of a
   neighbour's current value. The same tree draws the next move.
-- **Best state.** It is brought up to date from a list of the spins flipped since it was last written, not copied.
+- **Lowest states.** They are brought up to date from a list of the spins flipped since they were last written, not
+  copied.
 
 A sparse step costs a fixed part plus one exponential per changed weight; an array step costs one pass over all n
 rows of the couplings. `run()` takes the sparse kernel where that is the cheaper step:
@@ -294,13 +334,29 @@ kernel: in either, the couplings of a value to the values of one neighbour are o
   which changes the energy by a constant. The couplings of a variable left with one value are then in the fields.
   `run()` picks the kernel again for the reduced problem.
 
+### Recombination
+
+`pfa_native_fold.c` has one function for spins with the couplings as an array, one for spins with the couplings by
+row, and one for categorical variables, which reads both layouts as the elimination does.
+
+- **Groups.** The differing variables are disjoint sets, joined for every pair of them that interacts; each set then
+  has one sum, Δ(G). The work is the couplings of the differing variables: their stored neighbours on the sparse
+  kernels, their rows of the array otherwise.
+- **No tolerance.** A pair interacts when the expression above is not exactly 0. Where it is nonzero only by rounding,
+  two groups are joined that could have been chosen separately: a choice is lost, exactness is not.
+- **Two states per run.** Each kernel keeps the lowest state of the first and of the second half of its flips, with
+  the bookkeeping it already had: at the midpoint the current state becomes the lowest so far of the second half.
+- **Rounds.** The best state takes groups from the run's two states and from the state the run started from, going
+  round until its energy, a float64, no longer falls. A run brought nothing when that energy is not below the
+  energy of the state it started from.
+
 ## Usage
 
 `make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the four
 kernels: `pfa_native_spin.c` and `pfa_native_categorical.c` for couplings as an array, and `pfa_native_sparse_spin.c`
 and `pfa_native_sparse_categorical.c`, which draw from the tree of sums of `pfa_native_sums.c`; and
-`pfa_native_eliminate.c`. The first two use the one SIMD path that matches the machine; the rest is the same code on
-every path:
+`pfa_native_eliminate.c` and `pfa_native_fold.c`. The first two use the one SIMD path that matches the machine; the
+rest is the same code on every path:
 
 | path | files | used on |
 |---|---|---|
@@ -320,7 +376,7 @@ spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(coup
 values = pfa_native.run(couplings, fields, sizes=sizes, num_flips=100 * len(sizes), num_reps=10)
 ```
 
-It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as the value of each variable (int64).
+It returns the lowest-energy state found, as ±1 spins (int8), or with `sizes` as the value of each variable (int64).
 
 | parameter | what it is | default | theory |
 |---|---|---|---|
@@ -329,7 +385,7 @@ It returns the lowest-energy state seen, as ±1 spins (int8), or with `sizes` as
 | `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, variable by variable, so n = Σ (`sizes[r]` − 1). The energy sums the fields of the values taken and half the couplings between every two of them; couplings between values of the same variable must be zero. Each step changes one variable's value. Values that no optimum needs are removed first (see Elimination). |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by c scales the best `beta_max` by 1/c, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
 | `num_flips` | steps per run, the length of the anneal | `1000` | The budget of one run: num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
-| `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; run k restarts from the best state so far with β rising from (k−1)/(R−1)·`beta_max` (see Repetitions). The best state over all runs is returned. |
+| `num_reps` | runs of the anneal, R | `1` | The first starts from random spins; each later run restarts from the best state so far with β rising from c/(R−1)·`beta_max`, c the number of earlier runs that did not lower the best energy (see Repetitions). After each run the best state takes the groups of spins that the run has lower (see Recombination). |
 | `seed` | random seed | `42` | Sets the first run's spins and every run's Gumbel noise vector and offsets, or on the sparse kernels its draws, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
 | `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `sizes`, the tabu acts per variable, and n is the number of variables. Rarely worth changing. |
