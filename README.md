@@ -374,7 +374,10 @@ categorical variables, which reads both layouts as the elimination does.
   0. Where it is nonzero only by rounding, two clusters are merged that could have been chosen separately: a choice
   is lost, exactness is not.
 - **Two states per repetition.** Each kernel keeps the lowest state of the first and of the second half of its
-  steps: at the midpoint the current state becomes the lowest so far of the second half.
+  steps: at the midpoint the current state becomes the lowest so far of the second half. Where the split falls
+  matters little: at a quarter, three quarters or nine tenths of the steps the results were the same within the
+  spread between seeds. Without a split most of the gain is lost, because the lowest state of a whole restart is
+  usually the state it started from.
 - **Rounds.** The lowest of three states, the repetition's two and the state it started from, becomes the best state
   and takes clusters from the other two, round after round until its energy, a float64, no longer falls. The first
   repetition has only its two. A repetition brought nothing when that energy is not below the energy of the state it
