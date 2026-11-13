@@ -1,14 +1,14 @@
 // PFA fold (included by pfa_native.c): state a takes from state b every part that b has lower.
-// The variables on which a and b differ are put in groups: two of them share a group when their choices interact,
+// The variables on which a and b differ are put in clusters: two of them share a cluster when their choices interact,
 // that is when taking both from b does not change the energy by the sum of taking each alone. For spins i, j the
 // difference is 4 J_ij a_i a_j, nonzero whenever the coupling is; for variables r, s with values a_r, b_r and
 // a_s, b_s it is
 //     T(a_r, a_s) - T(a_r, b_s) - T(b_r, a_s) + T(b_r, b_s)
-// with T the couplings between their values. Variables of different groups do not interact, so the energy change
-// of taking a group from b is the same whatever is taken elsewhere:
-//     sum over the group of (the change of taking that variable alone) + sum over its pairs of the difference above
-// and every group with a negative change is taken. The result is the lowest state that has each group from a or
-// from b. An interaction counts when it is not exactly 0: one that is nonzero by rounding only joins two groups,
+// with T the couplings between their values. Variables of different clusters do not interact, so the energy change
+// of taking a cluster from b is the same whatever is taken elsewhere:
+//     sum over the cluster of (the change of taking that variable alone) + sum over its pairs of the difference above
+// and every cluster with a negative change is taken. The result is the lowest state that has each cluster from a or
+// from b. An interaction counts when it is not exactly 0: one that is nonzero by rounding only joins two clusters,
 // which loses a choice and nothing else.
 // Each function writes the result into a and returns the energy change, 0 or less.
 
@@ -23,8 +23,8 @@ static inline void fold_join(int *up, int p, int q) {
 }
 
 // delta[p]: the change of taking differing variable p alone plus its interactions with the later ones; up: the
-// groups. Sets take[p] for the members of the groups whose total is negative and returns the sum of those totals.
-static double fold_groups(int nd, int *up, const double *delta, double *sum, char *take) {
+// clusters. Sets take[p] for the members of the clusters whose total is negative and returns the sum of those totals.
+static double fold_clusters(int nd, int *up, const double *delta, double *sum, char *take) {
     double gain = 0.0;
     for (int p = 0; p < nd; p++) sum[p] = 0.0;
     for (int p = 0; p < nd; p++) sum[fold_root(up, p)] += delta[p];
@@ -56,7 +56,7 @@ double pfa_spin_fold(const double *J, const double *h, int n, float *a, const fl
             if (Ji[j] != 0.0) { delta[p] += 4.0 * Ji[j] * ai * (double)a[j]; fold_join(up, p, q); }
         }
     }
-    const double gain = fold_groups(nd, up, delta, sum, take);
+    const double gain = fold_clusters(nd, up, delta, sum, take);
     for (int p = 0; p < nd; p++) if (take[p]) a[d[p]] = b[d[p]];
     FOLD_FREE
     return gain;
@@ -82,7 +82,7 @@ double pfa_sparse_spin_fold(const int64_t *ptr, const int *idx, const double *va
         }
         delta[p] = -2.0 * ai * f + pairs;
     }
-    const double gain = fold_groups(nd, up, delta, sum, take);
+    const double gain = fold_clusters(nd, up, delta, sum, take);
     for (int p = 0; p < nd; p++) if (take[p]) a[d[p]] = b[d[p]];
     free(pos);
     FOLD_FREE
@@ -118,7 +118,7 @@ double pfa_categorical_fold(const int *first, int V, const int *vptr, const int 
         }
         delta[p] = (fb - fa) + pairs;
     }
-    const double gain = fold_groups(nd, up, delta, sum, take);
+    const double gain = fold_clusters(nd, up, delta, sum, take);
     for (int p = 0; p < nd; p++) if (take[p]) a[d[p]] = b[d[p]];
     free(pos);
     FOLD_FREE

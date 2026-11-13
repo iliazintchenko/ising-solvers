@@ -85,7 +85,7 @@ _lib.pfa_categorical_eliminate.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.int8, ndim=1, flags="C_CONTIGUOUS"),  # per value, value 0 included: allowed (out)
 ]
 _lib.pfa_categorical_eliminate.restype = ctypes.c_long
-# the folds: the first state takes from the second every group of variables that the second has lower (in place),
+# the folds: the first state takes from the second every cluster of variables that the second has lower (in place),
 # and the energy change is returned
 _lib.pfa_spin_fold.argtypes = [_f64_2d, _f64, ctypes.c_int, _f32, _f32]   # couplings, fields, spins, two states
 _lib.pfa_spin_fold.restype = ctypes.c_double
@@ -134,14 +134,14 @@ def run(
     flips after a spin flips, its dE is raised by tabu_lambda temperatures at
     the time of its flip (a tabu). The first repetition starts from random
     spins at beta = 0; each later one restarts from the best state so far,
-    with beta ramping up from c / (num_reps - 1) * beta_max, c the number of
-    repetitions so far that did not lower the best energy, so the restarts
-    cool as they stop paying. After each repetition the best state takes
-    from the repetition's lowest states (one per half of its flips) every
-    group of spins that they have lower: the spins on which two states
-    differ fall into groups not coupled to each other, and each group is
-    taken from the state where it costs less. Compiled to native code on
-    one core.
+    with beta ramping up from u / (num_reps - 1) * beta_max, u being 1 plus
+    the number of restarts so far that did not lower the best energy, so
+    the restarts cool as they stop paying. After each repetition
+    the best state takes from the repetition's lowest states (one per half
+    of its flips) every cluster of spins that they have lower: the spins on
+    which two states differ fall into clusters not coupled to each other,
+    and each cluster is taken from the state where it costs less. Compiled
+    to native code on one core.
 
     The couplings are an array or a scipy.sparse matrix; the format does not
     change the run. run() picks the kernel from the number of nonzero
@@ -285,7 +285,7 @@ def _spin_form(couplings, n):
 
 
 def _folded(fold, states):
-    """The lowest of the states, as (energy, state) pairs, after it has taken from the others every group of
+    """The lowest of the states, as (energy, state) pairs, after it has taken from the others every cluster of
     variables that one of them has lower (fold(a, b) does that for a from b and returns the energy change), going
     round until its energy no longer falls: its energy and the state."""
     energy, state = min(states, key=lambda pair: pair[0])
@@ -314,7 +314,7 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
         fold = lambda a, b: _lib.pfa_spin_fold(couplings, fields, n, a, b)
 
     spins_best = None
-    stale = 0   # repetitions so far that did not lower the best energy
+    stale = 0   # 1 after the first repetition, plus the restarts so far that did not lower the best energy
 
     for rep in range(num_reps):
         if rep == 0:
@@ -551,7 +551,7 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
     fields = np.ascontiguousarray(fields, dtype=np.float64)
     fold = lambda a, b: _lib.pfa_categorical_fold(*form.lines, fields, a, b)
     cur_best = None
-    stale = 0   # repetitions so far that did not lower the best energy
+    stale = 0   # 1 after the first repetition, plus the restarts so far that did not lower the best energy
     for rep in range(num_reps):
         if rep == 0:
             v = (rng.random(V) * sizes).astype(np.int64)                  # a uniformly random value per variable
