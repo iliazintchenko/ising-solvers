@@ -1,19 +1,28 @@
 # Pretty Fast Annealer
 
-PFA solves Ising problems: find the spins s ∈ {−1, +1}ⁿ that minimize
+PFA minimizes an energy of single-variable and pairwise terms over discrete variables: spins s ∈ {−1, +1}ⁿ, or
+variables that each take one of several values (see Categorical variables). For spins,
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
 ```
 
-for symmetric couplings J (zero diagonal) and fields h. Flipping spin j changes the energy by
+with symmetric couplings J (zero diagonal) and fields h, and flipping spin j changes the energy by
 
 ```
 ΔE_j = −2 s_j (h_j + Σ_k J_jk s_k)
 ```
 
-PFA is an annealer that never rejects: every step flips one spin, chosen among all of them by its Boltzmann weight.
-Variables with more than two values are handled directly (see Categorical variables).
+A problem over 0/1 variables x is the same problem in s = 2x − 1 (`pfa.from_binary`), and constraints enter as
+penalties (see Constraints). PFA is an annealer that never rejects: every step flips one spin, chosen among all of
+them by its Boltzmann weight.
+
+```python
+import pfa
+
+spins = pfa.run(couplings, fields, beta_max=1.0, num_steps=100 * n, num_reps=10)
+values = pfa.run(couplings, fields, sizes=sizes, num_steps=100 * len(sizes), num_reps=10)
+```
 
 ## Results vs. Simulated Annealing
 
@@ -399,16 +408,10 @@ the machine; the rest is the same code on every path:
 | scalar | `spin_scalar.c`, `categorical_scalar.c` | anything else |
 
 `pfa.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
-target. Then:
+target.
 
-```python
-import pfa
-
-spins = pfa.run(couplings, fields, beta_max=1.0, num_steps=100 * len(couplings), num_reps=10)
-values = pfa.run(couplings, fields, sizes=sizes, num_steps=100 * len(sizes), num_reps=10)
-```
-
-It returns the lowest-energy state found, as ±1 spins (int8), or with `sizes` as the value of each variable (int64).
+`pfa.run()` returns the lowest-energy state found, as ±1 spins (int8), or with `sizes` as the value of each variable
+(int64). Its parameters:
 
 | parameter | what it is | default | notes |
 |---|---|---|---|
@@ -426,7 +429,7 @@ A categorical problem in one-hot form, ½ xᵀ C x + fᵀ x over binary x with o
 `pfa.from_one_hot(couplings, fields, groups)`, with `groups[i]` the variable that x_i belongs to. It returns the
 couplings, fields, sizes and the energy offset between the two forms; `pfa.to_one_hot(values, groups)` converts a
 result back. A problem over 0/1 variables converts to spins with `pfa.from_binary(couplings, fields, offset)`, and
-`pfa.energy(state, couplings, fields, offset)` is ½ xᵀ J x + hᵀ x + offset for either kind of state.
+`pfa.energy(state, couplings, fields, offset)` is ½ sᵀ J s + hᵀ s + offset for a state of either kind.
 
 `examples/spins.py` solves a small problem given over 0/1 variables, `examples/colouring.py` colours a graph as a
 categorical problem, and `examples/throughput.py` measures steps per second.

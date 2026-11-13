@@ -127,7 +127,8 @@ def run(
     tabu_tenure: float = 0.25,
 ) -> np.ndarray:
     """
-    Attempts to find the ground state of an Ising problem with PFA, a
+    Minimizes 0.5 * s @ couplings @ s + fields @ s over spins s = +-1, or
+    with sizes the energy of a categorical problem (below), with PFA, a
     rejection-free annealer (see the README): every step flips one spin,
     chosen with probability proportional to exp(-beta * dE) by Gumbel-max
     sampling, while beta rises linearly to beta_max. For the tabu_tenure * n
