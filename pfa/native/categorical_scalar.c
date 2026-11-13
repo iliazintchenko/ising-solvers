@@ -1,4 +1,4 @@
-// Scalar pass for categorical variables (included by pfa_native_categorical.c), for targets without a SIMD path,
+// Scalar pass for categorical variables (included by categorical.c), for targets without a SIMD path,
 // over one chunk of slots [j, end), one slot at a time: update, score, and return the largest score.
 static inline float cat_chunk(double *F, const float *S, const double *ra, const double *rb, const int *grp,
                               const int *blk, const float *o, const float *g, float T, int j, int end) {

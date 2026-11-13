@@ -1,43 +1,43 @@
 import numpy as np
 
 
-def get_energy(
-    spins: np.ndarray,
+def energy(
+    state: np.ndarray,
     couplings: np.ndarray,
     fields: np.ndarray | None = None,
     offset: float | None = None,
 ) -> float:
     """
-    Compute the energy of the system with either binary spins (0, 1) or Ising
-    spins (-1, 1).
+    The energy of a state, +-1 spins or 0/1 variables:
 
-    energy = 0.5 * spins @ (couplings @ spins) + np.dot(fields, spins) + offset
+    energy = 0.5 * state @ (couplings @ state) + fields @ state + offset
 
     Parameters
     ----------
+    state : np.ndarray
+        A vector of length n.
     couplings : np.ndarray
-        A square matrix (n x n) representing the interaction strengths between the binary spins.
+        An n x n symmetric matrix with zero diagonal.
     fields : np.ndarray, optional
-        A vector of length n representing the external fields acting on each binary spin.
-        If not provided, defaults to a zero vector.
+        A vector of length n. Defaults to zeros.
     offset: float, optional
-        Constant energy offset term. If not provided, defaults to 0.
+        A constant. Defaults to 0.
 
     Returns
     -------
     float
-        The energy of the system.
+        The energy.
     """
 
-    energy = 0.5 * spins @ (couplings @ spins)
+    value = 0.5 * state @ (couplings @ state)
 
     if fields is not None:
-        energy += np.dot(fields, spins)
+        value += np.dot(fields, state)
 
     if offset is not None:
-        energy += offset
+        value += offset
 
-    return energy
+    return value
 
 
 def is_symmetric(matrix: np.ndarray) -> bool:
@@ -46,23 +46,23 @@ def is_symmetric(matrix: np.ndarray) -> bool:
     return all(np.array_equal(matrix[i : i + 256, i:], matrix[i:, i : i + 256].T) for i in range(0, n, 256))
 
 
-def validate_hamiltonian(
+def validate(
     couplings: np.ndarray, fields: np.ndarray | None = None
 ) -> None:
     """
-    Validates the couplings matrix and fields vector for consistency.
+    Checks the couplings and fields: square, symmetric, zero diagonal, matching lengths.
 
     Parameters
     ----------
     couplings : np.ndarray
-        A square matrix (n x n) representing the interaction strengths between the binary spins.
+        An n x n matrix.
     fields : np.ndarray, optional
-        A vector of length n representing the external fields acting on each binary spin.
+        A vector of length n.
 
     Raises
     ------
     ValueError
-        If any of the input checks fail.
+        If any of the checks fail.
     """
 
     if couplings.shape[0] != couplings.shape[1]:
@@ -76,36 +76,34 @@ def validate_hamiltonian(
         raise ValueError("Couplings must be symmetric matrix")
 
 
-def binary_to_ising(
+def from_binary(
     couplings: np.ndarray,
     fields: np.ndarray | None = None,
     offset: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """
-    Maps the Hamiltonian of a system with binary spins (0, 1) to an equivalent Hamiltonian
-    of a system with Ising spins (-1, +1).
+    Rewrites a problem over 0/1 variables x as one over +-1 spins s = 2 x - 1, with the same energies.
 
     Parameters
     ----------
     couplings : np.ndarray
-        A square matrix (n x n) representing the interaction strengths between the binary spins.
+        An n x n symmetric matrix with zero diagonal, the couplings between the 0/1 variables.
     fields : np.ndarray, optional
-        A vector of length n representing the external fields acting on each binary spin.
-        If not provided, it defaults to a zero vector.
+        A vector of length n. Defaults to zeros.
     offset: float, optional
-        Constant energy offset term. If not provided, defaults to 0.
+        A constant. Defaults to 0.
 
     Returns
     -------
     np.ndarray
-        The transformed coupling matrix for the Ising spins.
+        The couplings between the spins.
     np.ndarray
-        The transformed field vector for the Ising spins.
+        The fields on the spins.
     float
-        The shifted offset term.
+        The constant.
     """
 
-    validate_hamiltonian(couplings, fields)
+    validate(couplings, fields)
 
     n = len(couplings)
     couplings = couplings.copy()

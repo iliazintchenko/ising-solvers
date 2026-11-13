@@ -1,7 +1,7 @@
-// PFA sparse spin kernel (included by pfa_native.c): the anneal of pfa_native_spin.c for couplings stored by row as
+// PFA sparse spin kernel (included by pfa.c): the anneal of spin.c for couplings stored by row as
 // (column, value) pairs, with the same schedule, fields, tabu and bookkeeping.
 //   - Flipping spin i changes phi_j only for the neighbours j of i: one add or subtract per stored coupling.
-//   - The next spin is drawn from a tree of sums (pfa_native_sums.c) with probability proportional to
+//   - The next spin is drawn from a tree of sums (sums.c) with probability proportional to
 //     exp(beta x_j), x_j = 4 s_j phi_j = -dE_j, the tabu penalty folded into phi as in the spin kernel. Only the
 //     neighbours, the flipped spin and a spin leaving the tabu list get a new x_j.
 //   - The lowest state of each half is kept up to date from a list of the spins flipped since it was last written.
@@ -65,10 +65,10 @@ static void sparse_loop(const int64_t *ptr, const int *idx, const double *val, d
 }
 
 // ptr, idx, val: the couplings by row, row i in idx/val[ptr[i] .. ptr[i + 1]); seed: for the draws. No noise buffer
-// and no first spin; everything else as pfa_native_anneal.
-void pfa_sparse_anneal(const int64_t *ptr, const int *idx, const double *val, double *phi, float *s, int n,
-                       long nflips, double beta_start, double beta_max, double *E_io, double *best_io, float *sbest,
-                       double *late_io, float *slate, uint64_t seed, double lambda, int tenure) {
+// and no first spin; everything else as pfa_anneal_spin.
+void pfa_anneal_sparse_spin(const int64_t *ptr, const int *idx, const double *val, double *phi, float *s, int n,
+                            long nflips, double beta_start, double beta_max, double *E_io, double *best_io,
+                            float *sbest, double *late_io, float *slate, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(n, sizeof(double));
     long *last = malloc(sizeof(long) * n);
     int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1)), *moved = malloc(sizeof(int) * n);

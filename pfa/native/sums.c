@@ -1,4 +1,4 @@
-// Selection for the sparse kernels (included by pfa_native.c). Each of n candidates k (a spin, or a value of a
+// Selection for the sparse kernels (included by pfa.c). Each of n candidates k (a spin, or a value of a
 // variable) has a value x[k] = -dE_k minus its tabu penalty, and the next one is drawn with probability
 // exp(beta x[k]) / sum_j exp(beta x[j]). That is the distribution of argmax_k(beta x[k] + g_k) with fresh Gumbel
 // noise g at every step, which the array kernels sample with stored noise. A sparse step changes few x[k], and

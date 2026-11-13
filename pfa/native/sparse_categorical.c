@@ -1,4 +1,4 @@
-// PFA sparse categorical kernel (included by pfa_native.c): the anneal of pfa_native_categorical.c for problems
+// PFA sparse categorical kernel (included by pfa.c): the anneal of categorical.c for problems
 // where each variable is coupled to few others, with the same schedule, moves, fields, tabu and bookkeeping.
 // Slots, F, S, cur and the tabu are as there; first[r] is the first slot of variable r (first[V] = m).
 //   - Couplings are stored per pair of coupled variables, as full tables. The neighbours of variable r are
@@ -6,7 +6,7 @@
 //     neighbour after the other: vals[rows[r] + (k - first[r]) * len[r] ..), len[r] values.
 //   - A move of r from value a to b changes the fields of its neighbours' slots only, by the row of b minus the row
 //     of a, applied at once.
-//   - The next move is drawn from a tree of sums (pfa_native_sums.c) with probability proportional to
+//   - The next move is drawn from a tree of sums (sums.c) with probability proportional to
 //     exp(beta x_k), x_k = o + S[k] F[k] = -dE_k - pen[r], with o = F[cur[r]] - pen[r] (0 for a two-value variable,
 //     whose tabu is in F). A move gives new x_k to the slots of the moved variable and of its neighbours (their o
 //     changes with the field of their current slot), and to those of a variable leaving the tabu list.
@@ -89,8 +89,8 @@ static void sparse_cat_loop(const int *first, const int *vptr, const int *adj, c
 }
 
 // first: V + 1 slot offsets; vptr, adj, rows, vals: the couplings, see above; F: m fields (updated in place); cur: V
-// current slots (updated in place); seed: for the draws. No noise buffer; everything else as pfa_categorical_anneal.
-void pfa_sparse_categorical_anneal(const int *first, const int *vptr, const int *adj, const int64_t *rows,
+// current slots (updated in place); seed: for the draws. No noise buffer; everything else as pfa_anneal_categorical.
+void pfa_anneal_sparse_categorical(const int *first, const int *vptr, const int *adj, const int64_t *rows,
                                    const double *vals, double *F, int m, int V, int *cur, long nmoves,
                                    double beta_start, double beta_max, double *E_io, double *best_io, int *best_cur,
                                    double *late_io, int *late_cur, uint64_t seed, double lambda, int tenure) {

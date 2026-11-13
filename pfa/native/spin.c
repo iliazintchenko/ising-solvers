@@ -1,4 +1,4 @@
-// PFA spin kernel (included by pfa_native.c): after flipping spin i, ONE pass over all spins updates every
+// PFA spin kernel (included by pfa.c): after flipping spin i, ONE pass over all spins updates every
 // local field and finds the next spin to flip, argmax_j(-beta * dE_j + noise_j) (Gumbel-max sampling).
 //
 // State per spin j: phi_j = (h_j + sum_k J_jk s_k) / 2 in float64, and s_j as a float32 +-1. Then
@@ -21,7 +21,7 @@
 // is applied by shifting the spin's stored field, phi~_i = phi_i - s_i * c_i with c_i = lambda / (4 beta) at the
 // time of its flip, so the pass reads nothing extra; the anneal loop adds and removes the shift, O(1) per flip.
 //
-// The pass is flip_pass(), one version per SIMD path in pfa_native_spin_<path>.c. The SIMD passes handle spins in
+// The pass is flip_pass(), one version per SIMD path in spin_<path>.c. The SIMD passes handle spins in
 // groups of 16 and the last n mod 16 spins with tail_pass() below. Every path breaks argmax ties toward the smallest
 // index (like numpy.argmax).
 
@@ -85,9 +85,9 @@ ANNEAL_ATTR static void anneal_loop(const double *J, double *phi, float *s, cons
 // state it starts from included: slate and *late_io (out).
 // beta rises linearly from beta_start to beta_max; seed: for the random noise offsets; tabu: penalty lambda in
 // temperatures for the last tenure flips (tenure 0: no tabu).
-void pfa_native_anneal(const double *J, double *phi, float *s, const float *noise, int n,
-                       long nflips, double beta_start, double beta_max, int bi, double *E_io, double *best_io,
-                       float *sbest, double *late_io, float *slate, uint64_t seed, double lambda, int tenure) {
+void pfa_anneal_spin(const double *J, double *phi, float *s, const float *noise, int n, long nflips,
+                     double beta_start, double beta_max, int bi, double *E_io, double *best_io, float *sbest,
+                     double *late_io, float *slate, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(n, sizeof(double));
     long *last = malloc(sizeof(long) * n);
     int *recent = malloc(sizeof(int) * (tenure > 0 ? tenure : 1));

@@ -1,4 +1,4 @@
-// PFA fold (included by pfa_native.c): state a takes from state b every part that b has lower.
+// PFA fold (included by pfa.c): state a takes from state b every part that b has lower.
 // The variables on which a and b differ are put in clusters: two of them share a cluster when their choices interact,
 // that is when taking both from b does not change the energy by the sum of taking each alone. For spins i, j the
 // difference is 4 J_ij a_i a_j, nonzero whenever the coupling is; for variables r, s with values a_r, b_r and
@@ -42,7 +42,7 @@ static double fold_clusters(int nd, int *up, const double *delta, double *sum, c
 #define FOLD_FREE free(d); free(up); free(delta); free(sum); free(take);
 
 // Spins, couplings as an n x n array: E = s J s / 2 + h s.
-double pfa_spin_fold(const double *J, const double *h, int n, float *a, const float *b) {
+double pfa_fold_spin(const double *J, const double *h, int n, float *a, const float *b) {
     FOLD_NEW(n)
     for (int i = 0; i < n; i++) if (a[i] != b[i]) { up[nd] = nd; d[nd++] = i; }
     for (int p = 0; p < nd; p++) {
@@ -62,8 +62,8 @@ double pfa_spin_fold(const double *J, const double *h, int n, float *a, const fl
     return gain;
 }
 
-// Spins, couplings by row as in pfa_sparse_anneal.
-double pfa_sparse_spin_fold(const int64_t *ptr, const int *idx, const double *val, const double *h, int n, float *a,
+// Spins, couplings by row as in pfa_anneal_sparse_spin.
+double pfa_fold_sparse_spin(const int64_t *ptr, const int *idx, const double *val, const double *h, int n, float *a,
                             const float *b) {
     FOLD_NEW(n)
     int *pos = malloc(sizeof(int) * n);   // place of a differing spin in d, else -1
@@ -89,9 +89,9 @@ double pfa_sparse_spin_fold(const int64_t *ptr, const int *idx, const double *va
     return gain;
 }
 
-// Categorical variables, with the slots and the couplings read as in pfa_native_eliminate.c (both layouts); a, b:
+// Categorical variables, with the slots and the couplings read as in eliminate.c (both layouts); a, b:
 // the slot of each variable's value, -1 at value 0.
-double pfa_categorical_fold(const int *first, int V, const int *vptr, const int *adj, const int64_t *seg,
+double pfa_fold_categorical(const int *first, int V, const int *vptr, const int *adj, const int64_t *seg,
                             const int64_t *rows, const int64_t *len, const double *vals, const double *fields, int *a,
                             const int *b) {
     FOLD_NEW(V)

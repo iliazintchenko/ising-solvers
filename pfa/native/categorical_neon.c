@@ -1,4 +1,4 @@
-// NEON pass for categorical variables (included by pfa_native_categorical.c), over one chunk of slots [j, end).
+// NEON pass for categorical variables (included by categorical.c), over one chunk of slots [j, end).
 // 8 slots per step = 4 float64 vectors of fields -> 2 float32 score vectors: update (subtract a row, add a row, or
 // both), score, and return the largest score. Where blk gives the 8 slots one o, it is one broadcast. Otherwise (NEON
 // has no gather): slots are grouped by variable and every variable has one, so the variables of 4 slots are grp[k] ..

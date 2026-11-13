@@ -1,4 +1,4 @@
-// SVE pass for categorical variables (included by pfa_native_categorical.c), over one chunk of slots [j, end).
+// SVE pass for categorical variables (included by categorical.c), over one chunk of slots [j, end).
 // One float64 vector of fields per step: update (subtract a row, add a row, or both), score, and return the largest
 // score. The float32 scores stay in the low halves of the 64-bit lanes: signs, noise and o are loaded as 32-bit
 // values into 64-bit lanes. Where blk gives the vector's slots one o (vectors that divide a block of 8), it is one

@@ -339,7 +339,7 @@ entries, 24 bytes per nonzero coupling, plus for categorical variables its table
 
 ### Elimination
 
-One function, in `pfa_native_eliminate.c`, reads both layouts of the couplings, the array and the tables of the
+One function, in `eliminate.c`, reads both layouts of the couplings, the array and the tables of the
 sparse kernel: in either, the couplings of a value to the values of one neighbour are one stretch of memory.
 
 - **A failing test stops early.** The test is made for every two values a and b of one variable, and most of them
@@ -364,7 +364,7 @@ sparse kernel: in either, the couplings of a value to the values of one neighbou
 
 ### Recombination
 
-`pfa_native_fold.c` has one function for spins on the array kernel, one for spins on the sparse kernel, and one for
+`fold.c` has one function for spins on the array kernel, one for spins on the sparse kernel, and one for
 categorical variables, which reads both layouts as the elimination does.
 
 - **Clusters.** Each differing variable starts as its own set, and two sets are merged whenever a variable of one
@@ -385,28 +385,27 @@ categorical variables, which reads both layouts as the elimination does.
 
 ## Usage
 
-`make` (GCC or Clang) compiles `ising_solvers/native/pfa_native.c` for the current machine. It includes the four
-kernels: `pfa_native_spin.c` and `pfa_native_categorical.c` for couplings as an array, and `pfa_native_sparse_spin.c`
-and `pfa_native_sparse_categorical.c`, which draw from the tree of sums of `pfa_native_sums.c`; and
-`pfa_native_eliminate.c` and `pfa_native_fold.c`. The two array kernels use the one SIMD path that matches the
-machine; the rest is the same code on every path:
+`make` (GCC or Clang) compiles `pfa/native/pfa.c` for the current machine. It includes the four kernels: `spin.c`
+and `categorical.c` for couplings as an array, and `sparse_spin.c` and `sparse_categorical.c`, which draw from the
+tree of sums of `sums.c`; and `eliminate.c` and `fold.c`. The two array kernels use the one SIMD path that matches
+the machine; the rest is the same code on every path:
 
 | path | files | used on |
 |---|---|---|
-| SVE | `pfa_native_spin_sve.c`, `pfa_native_categorical_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
-| NEON | `pfa_native_spin_neon.c`, `pfa_native_categorical_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
-| AVX-512 | `pfa_native_spin_avx512.c`, `pfa_native_categorical_avx512.c` | x86-64 with AVX-512 |
-| AVX2 | `pfa_native_spin_avx2.c`, `pfa_native_categorical_avx2.c` | x86-64 with AVX2 |
-| scalar | `pfa_native_spin_scalar.c`, `pfa_native_categorical_scalar.c` | anything else |
+| SVE | `spin_sve.c`, `categorical_sve.c` | ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...) |
+| NEON | `spin_neon.c`, `categorical_neon.c` | every other 64-bit ARM (Apple Silicon, Graviton2, Ampere Altra, ...) |
+| AVX-512 | `spin_avx512.c`, `categorical_avx512.c` | x86-64 with AVX-512 |
+| AVX2 | `spin_avx2.c`, `categorical_avx2.c` | x86-64 with AVX2 |
+| scalar | `spin_scalar.c`, `categorical_scalar.c` | anything else |
 
-`pfa_native.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
+`pfa.simd_path()` reports which one was built; `make -B ARCH_FLAGS="-mavx2 -mfma"` rebuilds for another
 target. Then:
 
 ```python
-from ising_solvers import pfa_native
+import pfa
 
-spins = pfa_native.run(couplings, fields, beta_max=1.0, num_flips=100 * len(couplings), num_reps=10)
-values = pfa_native.run(couplings, fields, sizes=sizes, num_flips=100 * len(sizes), num_reps=10)
+spins = pfa.run(couplings, fields, beta_max=1.0, num_steps=100 * len(couplings), num_reps=10)
+values = pfa.run(couplings, fields, sizes=sizes, num_steps=100 * len(sizes), num_reps=10)
 ```
 
 It returns the lowest-energy state found, as ±1 spins (int8), or with `sizes` as the value of each variable (int64).
@@ -417,15 +416,17 @@ It returns the lowest-energy state found, as ±1 spins (int8), or with `sizes` a
 | `fields` | h, a length-n vector | `None` (zeros) | Enter only through the local fields φ, so they cost nothing per flip. |
 | `sizes` | for categorical problems, the number of values of each variable | `None` | Makes the problem categorical (see Categorical variables): variable r takes a value in 0 … `sizes[r]` − 1. Each value other than 0 has a row and column of `couplings` and an entry of `fields`, ordered by variable (variable 0's values 1 … `sizes[0]` − 1 first), so n = Σ (`sizes[r]` − 1). The energy is the fields of the values taken plus each coupling between two of them once: ½ xᵀ C x + fᵀ x with x_k = 1 for the values taken. Couplings between values of the same variable must be zero. Each step changes one variable's value. Values that no optimum needs are removed first (see Elimination). |
 | `beta_max` | the final inverse temperature | `1.0` | Measured in 1/energy: scaling the energy by α scales the best `beta_max` by 1/α, so the default suits only ΔE of order one. A linear schedule is nearly as good as optimized ones (Isakov et al.). |
-| `num_flips` | steps per repetition, the length of the anneal | `1000` | The budget of one repetition: on the array kernels num_flips · n field updates, or num_flips / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
+| `num_steps` | steps per repetition, the length of the anneal | `1000` | The budget of one repetition: on the array kernels num_steps · n field updates, or num_steps / n flips per spin. Longer anneals track the cooling more closely and reach lower energies. |
 | `num_reps` | repetitions of the anneal, R | `1` | The first starts from random spins; each later one restarts from the best state so far with β rising from u/(R−1)·`beta_max`, u being 1 plus the number of restarts so far that did not lower the best energy (see Repetitions). After each repetition the best state takes the clusters of spins that the repetition has lower (see Recombination). |
 | `seed` | random seed | `42` | Sets the first repetition's spins and every repetition's Gumbel noise vector and offsets, or on the sparse kernels its draws, so results are reproducible. |
 | `tabu_lambda` | the tabu penalty λ, in temperatures | `3.0` | Divides a just-flipped spin's weight by e^λ (see Tabu). Rarely worth changing. |
 | `tabu_tenure` | the tabu tenure, as a fraction of n | `0.25` | A spin stays tabu for `tabu_tenure` · n flips; 0 turns the tabu off. With `sizes`, the tabu acts per variable, for `tabu_tenure` · V steps, V the number of variables. Rarely worth changing. |
 
 A categorical problem in one-hot form, ½ xᵀ C x + fᵀ x over binary x with one 1 per group, converts with
-`pfa_native.categorical_from_one_hot(couplings, fields, groups)`, with `groups[i]` the variable that x_i belongs to.
-It returns the couplings, fields, sizes and the energy offset between the two forms;
-`pfa_native.categorical_to_one_hot(values, groups)` converts a result back.
+`pfa.from_one_hot(couplings, fields, groups)`, with `groups[i]` the variable that x_i belongs to. It returns the
+couplings, fields, sizes and the energy offset between the two forms; `pfa.to_one_hot(values, groups)` converts a
+result back. A problem over 0/1 variables converts to spins with `pfa.from_binary(couplings, fields, offset)`, and
+`pfa.energy(state, couplings, fields, offset)` is ½ xᵀ J x + hᵀ x + offset for either kind of state.
 
-`examples/quickstart.py` solves a small problem and measures flips per second.
+`examples/spins.py` solves a small problem given over 0/1 variables, `examples/colouring.py` colours a graph as a
+categorical problem, and `examples/throughput.py` measures steps per second.

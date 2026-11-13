@@ -1,11 +1,11 @@
-// PFA dead-end elimination for categorical problems (included by pfa_native.c): removes values that no optimum
+// PFA dead-end elimination for categorical problems (included by pfa.c): removes values that no optimum
 // needs, before the anneal. Value a of variable r is removed when another allowed value b of r has
 //     d(a, b) = f(a) - f(b) + sum over the neighbours s of r of  min over the allowed c of s of (T(a, c) - T(b, c))  >=  0
 // with f the fields and T the couplings: b is then at least as good as a whatever the other variables do, so every
 // state that uses a has one of no higher energy that does not, and an optimum always remains. Removing a value of s
 // takes it out of the minima of the neighbours of s, which can make more of their values removable, so the
 // variables whose neighbours lost a value are tested again until nothing changes.
-//   - Slots and first[] are as in pfa_native_sparse_categorical.c: value v > 0 of variable r is slot
+//   - Slots and first[] are as in sparse_categorical.c: value v > 0 of variable r is slot
 //     first[r] + v - 1, value 0 has no slot, no field and no couplings. alive[first[r] + r + v] says whether value v
 //     of r is allowed, v = 0 .. first[r + 1] - first[r].
 //   - Couplings are read as there: the neighbours of r are adj[vptr[r] .. vptr[r + 1]), the line of a slot k of r is
@@ -35,9 +35,8 @@ static inline double elim_min(const double *A, const double *B, const double *pe
     return m2 < m0 ? m2 : m0;
 }
 
-long pfa_categorical_eliminate(const int *first, int V, const int *vptr, const int *adj, const int64_t *seg,
-                               const int64_t *rows, const int64_t *len, const double *vals, const double *fields,
-                               char *alive) {
+long pfa_eliminate(const int *first, int V, const int *vptr, const int *adj, const int64_t *seg, const int64_t *rows,
+                   const int64_t *len, const double *vals, const double *fields, char *alive) {
     const int m = first[V];
     int qmax = 0;
     int64_t lmax = 0;

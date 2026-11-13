@@ -3,10 +3,10 @@ import os
 
 import numpy as np
 
-from .utils import get_energy, is_symmetric, validate_hamiltonian
+from .utils import validate
 
 # built by running `make` in the repository root
-_LIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "native", "libpfa_native.so")
+_LIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "native", "libpfa.so")
 _lib = ctypes.CDLL(_LIB_PATH)
 
 _f64 = np.ctypeslib.ndpointer(dtype=np.float64, ndim=1, flags="C_CONTIGUOUS")
@@ -14,7 +14,7 @@ _f32 = np.ctypeslib.ndpointer(dtype=np.float32, ndim=1, flags="C_CONTIGUOUS")
 _f64_2d = np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags="C_CONTIGUOUS")
 _i32 = np.ctypeslib.ndpointer(dtype=np.int32, ndim=1, flags="C_CONTIGUOUS")
 _i64 = np.ctypeslib.ndpointer(dtype=np.int64, ndim=1, flags="C_CONTIGUOUS")
-_lib.pfa_native_anneal.argtypes = [
+_lib.pfa_anneal_spin.argtypes = [
     _f64_2d,  # couplings, read in place
     _f64,  # local fields / 2: (fields + couplings @ spins) / 2 (updated in place)
     _f32,  # spins as +-1 (updated in place)
@@ -33,8 +33,8 @@ _lib.pfa_native_anneal.argtypes = [
     ctypes.c_double,  # tabu penalty lambda, in temperatures
     ctypes.c_int,  # tabu tenure, in flips
 ]
-_lib.pfa_native_anneal.restype = None
-_lib.pfa_categorical_anneal.argtypes = [
+_lib.pfa_anneal_spin.restype = None
+_lib.pfa_anneal_categorical.argtypes = [
     _f64_2d,  # couplings between the values other than 0
     _f64,  # fields of those values, plus their couplings to the current values (updated in place)
     ctypes.c_int,  # number of values other than 0
@@ -54,25 +54,25 @@ _lib.pfa_categorical_anneal.argtypes = [
     ctypes.c_double,  # tabu penalty lambda, in temperatures
     ctypes.c_int,  # tabu tenure, in moves
 ]
-_lib.pfa_categorical_anneal.restype = None
+_lib.pfa_anneal_categorical.restype = None
 # the sparse kernels: the couplings argument is replaced by the stored couplings, and they take no noise buffer
 # (and no first spin): the seed is for their draws
-_spin_args, _cat_args = _lib.pfa_native_anneal.argtypes, _lib.pfa_categorical_anneal.argtypes
-_lib.pfa_sparse_anneal.argtypes = [
+_spin_args, _cat_args = _lib.pfa_anneal_spin.argtypes, _lib.pfa_anneal_categorical.argtypes
+_lib.pfa_anneal_sparse_spin.argtypes = [
     _i64,  # where each row of the couplings starts
     _i32,  # column of each stored coupling
     _f64,  # value of each stored coupling
 ] + _spin_args[1:3] + _spin_args[4:8] + _spin_args[9:]
-_lib.pfa_sparse_anneal.restype = None
-_lib.pfa_sparse_categorical_anneal.argtypes = [
+_lib.pfa_anneal_sparse_spin.restype = None
+_lib.pfa_anneal_sparse_categorical.argtypes = [
     _i32,  # first row of each variable, and the number of rows
     _i32,  # where each variable's neighbours start
     _i32,  # the neighbours: the variables it is coupled to
     _i64,  # where each variable's couplings start
     _f64,  # per variable, a table: one line per value other than 0, its couplings to the neighbours' values
 ] + _cat_args[1:4] + _cat_args[5:6] + _cat_args[7:]
-_lib.pfa_sparse_categorical_anneal.restype = None
-_lib.pfa_categorical_eliminate.argtypes = [
+_lib.pfa_anneal_sparse_categorical.restype = None
+_lib.pfa_eliminate.argtypes = [
     _i32,  # first row of each variable, and the number of rows
     ctypes.c_int,  # number of variables
     _i32,  # where each variable's neighbours start
@@ -84,16 +84,16 @@ _lib.pfa_categorical_eliminate.argtypes = [
     _f64,  # fields
     np.ctypeslib.ndpointer(dtype=np.int8, ndim=1, flags="C_CONTIGUOUS"),  # per value, value 0 included: allowed (out)
 ]
-_lib.pfa_categorical_eliminate.restype = ctypes.c_long
+_lib.pfa_eliminate.restype = ctypes.c_long
 # the folds: the first state takes from the second every cluster of variables that the second has lower (in place),
 # and the energy change is returned
-_lib.pfa_spin_fold.argtypes = [_f64_2d, _f64, ctypes.c_int, _f32, _f32]   # couplings, fields, spins, two states
-_lib.pfa_spin_fold.restype = ctypes.c_double
-_lib.pfa_sparse_spin_fold.argtypes = _lib.pfa_sparse_anneal.argtypes[:3] + [_f64, ctypes.c_int, _f32, _f32]
-_lib.pfa_sparse_spin_fold.restype = ctypes.c_double
-_lib.pfa_categorical_fold.argtypes = _lib.pfa_categorical_eliminate.argtypes[:9] + [_i32, _i32]   # two states, as rows
-_lib.pfa_categorical_fold.restype = ctypes.c_double
-_lib.pfa_categorical_prepare.argtypes = [
+_lib.pfa_fold_spin.argtypes = [_f64_2d, _f64, ctypes.c_int, _f32, _f32]   # couplings, fields, spins, two states
+_lib.pfa_fold_spin.restype = ctypes.c_double
+_lib.pfa_fold_sparse_spin.argtypes = _lib.pfa_anneal_sparse_spin.argtypes[:3] + [_f64, ctypes.c_int, _f32, _f32]
+_lib.pfa_fold_sparse_spin.restype = ctypes.c_double
+_lib.pfa_fold_categorical.argtypes = _lib.pfa_eliminate.argtypes[:9] + [_i32, _i32]   # two states, as rows
+_lib.pfa_fold_categorical.restype = ctypes.c_double
+_lib.pfa_from_one_hot.argtypes = [
     _f64_2d,  # one-hot couplings over all slots
     _f64,  # one-hot fields
     ctypes.c_int,  # number of slots
@@ -105,14 +105,14 @@ _lib.pfa_categorical_prepare.argtypes = [
     _f64_2d,  # couplings between the other slots, relative to the reference slots (out)
     _f64,  # fields of the other slots, relative to the reference slots (out)
 ]
-_lib.pfa_categorical_prepare.restype = ctypes.c_double
-_lib.pfa_native_simd_path.argtypes = []
-_lib.pfa_native_simd_path.restype = ctypes.c_char_p
+_lib.pfa_from_one_hot.restype = ctypes.c_double
+_lib.pfa_simd_path.argtypes = []
+_lib.pfa_simd_path.restype = ctypes.c_char_p
 
 
 def simd_path() -> str:
     """Name of the SIMD code path the native library was compiled with."""
-    return _lib.pfa_native_simd_path().decode()
+    return _lib.pfa_simd_path().decode()
 
 
 def run(
@@ -120,7 +120,7 @@ def run(
     fields: np.ndarray | None = None,
     sizes: np.ndarray | None = None,
     beta_max: float = 1.0,
-    num_flips: int = 1000,
+    num_steps: int = 1000,
     num_reps: int = 1,
     seed: int = 42,
     tabu_lambda: float = 3.0,
@@ -166,7 +166,7 @@ def run(
     the number of variables steps. Before the anneal, values that another
     value of the same variable is at least as good as, whatever the other
     variables do, are removed (dead-end elimination): a state of the lowest
-    energy always remains. categorical_from_one_hot() converts the one-hot
+    energy always remains. from_one_hot() converts the one-hot
     form.
 
     Parameters:
@@ -174,7 +174,7 @@ def run(
         fields (np.ndarray, optional): External field terms. Defaults to None.
         sizes (np.ndarray, optional): For categorical problems, the number of values of each variable. Defaults to None.
         beta_max (float): The maximum inverse temperature. Defaults to 1.0.
-        num_flips (int): Steps per repetition, each flipping a spin or changing one variable's value. Defaults to 1000.
+        num_steps (int): Steps per repetition, each flipping a spin or changing one variable's value. Defaults to 1000.
         num_reps (int): Number of repetitions: the first from random spins, each further one from the best state so far, which takes the parts each repetition has lower. Defaults to 1.
         seed (int): Seed for the random number generator
         tabu_lambda (float): Tabu penalty on a just-flipped spin, in temperatures. Defaults to 3.0;
@@ -187,7 +187,7 @@ def run(
         ValueError: If input parameters are invalid.
     """
 
-    validate_hamiltonian(couplings, fields)
+    validate(couplings, fields)
     sparse = hasattr(couplings, "tocsr")
     if sparse:
         couplings = couplings.tocsr().astype(np.float64)
@@ -209,8 +209,8 @@ def run(
 
     if beta_max <= 0.0:
         raise ValueError("beta_max must be positive")
-    if num_flips <= 1:
-        raise ValueError("num_flips must be at least 2")
+    if num_steps <= 1:
+        raise ValueError("num_steps must be at least 2")
     if num_reps <= 0:
         raise ValueError("num_reps must be positive")
     if tabu_lambda < 0.0:
@@ -219,9 +219,9 @@ def run(
         raise ValueError("tabu_tenure must be between 0 and 1")
     fields = np.zeros(couplings.shape[0]) if fields is None else np.ascontiguousarray(fields, dtype=np.float64)
     if sizes is not None:
-        return _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
+        return _run_categorical(couplings, fields, sizes, beta_max, num_steps, num_reps, seed, tabu_lambda, tabu_tenure)
     form = _spin_form(couplings, len(fields))
-    return _run_spins(form, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure)
+    return _run_spins(form, fields, beta_max, num_steps, num_reps, seed, tabu_lambda, tabu_tenure)
 
 
 def _sparse_is_faster(changed, size, spins):
@@ -297,7 +297,7 @@ def _folded(fold, states):
         energy = lower
 
 
-def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+def _run_spins(couplings, fields, beta_max, num_steps, num_reps, seed, tabu_lambda, tabu_tenure):
     """run() for spins, on validated input, with the couplings as _spin_form() returns them."""
     sparse = isinstance(couplings, tuple)
     n = len(fields) if sparse else couplings.shape[0]
@@ -309,9 +309,9 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
 
     rng = np.random.default_rng(seed)
     if sparse:
-        fold = lambda a, b: _lib.pfa_sparse_spin_fold(*stored, fields, n, a, b)
+        fold = lambda a, b: _lib.pfa_fold_sparse_spin(*stored, fields, n, a, b)
     else:
-        fold = lambda a, b: _lib.pfa_spin_fold(couplings, fields, n, a, b)
+        fold = lambda a, b: _lib.pfa_fold_spin(couplings, fields, n, a, b)
 
     spins_best = None
     stale = 0   # 1 after the first repetition, plus the restarts so far that did not lower the best energy
@@ -325,10 +325,9 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
             beta_start = beta_max * stale / (num_reps - 1)   # restarts cool: one step per repetition that brought nothing
         if sparse:
             coupled = np.bincount(row, weights=data * spins[col], minlength=n)   # couplings @ spins
-            energy = 0.5 * spins @ coupled + fields @ spins
         else:
             coupled = couplings @ spins
-            energy = get_energy(spins, couplings, fields)
+        energy = 0.5 * spins @ coupled + fields @ spins
         half_fields = 0.5 * (fields + coupled)
         spins_f32 = spins.astype(np.float32)
         spins_first, spins_late = spins_f32.copy(), np.empty(n, dtype=np.float32)
@@ -336,8 +335,8 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
         first_c, late_c = ctypes.c_double(energy), ctypes.c_double()
         lowest = ctypes.byref(first_c), spins_first, ctypes.byref(late_c), spins_late
         if sparse:
-            _lib.pfa_sparse_anneal(
-                *stored, half_fields, spins_f32, n, num_flips, beta_start, beta_max, ctypes.byref(energy_c),
+            _lib.pfa_anneal_sparse_spin(
+                *stored, half_fields, spins_f32, n, num_steps, beta_start, beta_max, ctypes.byref(energy_c),
                 *lowest, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
             )
         else:
@@ -346,13 +345,13 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
             offsets_seed = int(rng.integers(1, 2**63))
             # first pick at beta_start: argmax_j(-beta_start * dE_j + noise_j), with dE_j = -4 s_j phi_j
             first = int(np.argmax(4.0 * beta_start * spins * half_fields + noise_vec))
-            _lib.pfa_native_anneal(
+            _lib.pfa_anneal_spin(
                 couplings,
                 half_fields,
                 spins_f32,
                 noise_buffer,
                 n,
-                num_flips,
+                num_steps,
                 beta_start,
                 beta_max,
                 first,
@@ -372,17 +371,17 @@ def _run_spins(couplings, fields, beta_max, num_flips, num_reps, seed, tabu_lamb
     return spins_best.astype(np.int8)
 
 
-def _run_categorical(couplings, fields, sizes, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+def _run_categorical(couplings, fields, sizes, beta_max, num_steps, num_reps, seed, tabu_lambda, tabu_tenure):
     """run() for categorical problems, on validated input (couplings as an array or a scipy.sparse CSR matrix).
     Variables with one value never move and are left out, and so are the values that elimination removes."""
     multi = sizes > 1
-    args = beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure
+    args = beta_max, num_steps, num_reps, seed, tabu_lambda, tabu_tenure
     x = np.zeros(len(sizes), dtype=np.int64)
     if not multi.any():
         return x
     form = _Form(couplings, sizes[multi])
     alive = np.empty(form.starts[-1] + len(form.starts) - 1, dtype=np.int8)
-    if not _lib.pfa_categorical_eliminate(*form.lines, np.ascontiguousarray(fields), alive):
+    if not _lib.pfa_eliminate(*form.lines, np.ascontiguousarray(fields), alive):
         x[multi] = _anneal_categorical(form, fields, *args)
         return x
     couplings, fields, count, value = _reduced(form, fields, alive.astype(bool))
@@ -398,8 +397,8 @@ class _Form:
     """The couplings of a categorical problem whose variables all have more than one value, as the kernel chosen
     for them reads them. starts: rows of variable r are starts[r] .. starts[r + 1] - 1. sparse: whether the sparse
     kernel runs it. couplings: _entries() for the sparse kernel, a float64 array for the array kernel. lines: how
-    both pfa_categorical_eliminate() and the sparse kernel find the couplings of a row to a neighbour's rows (see
-    pfa_native_eliminate.c): first row of each variable, number of variables, where each variable's neighbours
+    both pfa_eliminate() and the sparse kernel find the couplings of a row to a neighbour's rows (see
+    eliminate.c): first row of each variable, number of variables, where each variable's neighbours
     start, the neighbours, where a neighbour's rows start in a line, where each variable's lines start, the length
     of its lines, and the lines, which are the sparse kernel's tables or the array itself."""
 
@@ -524,7 +523,7 @@ def _reduced(form, fields, alive):
     return out, out_fields, count, value
 
 
-def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_lambda, tabu_tenure):
+def _anneal_categorical(form, fields, beta_max, num_steps, num_reps, seed, tabu_lambda, tabu_tenure):
     """The anneal of a categorical problem in the form of _Form: the value of each variable, 0 for its value 0."""
     starts, grp, sparse, couplings = form.starts, form.grp, form.sparse, form.couplings
     V, m = len(starts) - 1, int(starts[-1])
@@ -538,7 +537,7 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
         # constant), so it runs at beta / 4
         spin = _spin_form(couplings, m)
         sums = np.bincount(spin[0], weights=spin[2], minlength=m) if isinstance(spin, tuple) else spin.sum(axis=1)
-        spins = _run_spins(spin, 2.0 * fields + sums, beta_max / 4.0, num_flips, num_reps, seed, tabu_lambda,
+        spins = _run_spins(spin, 2.0 * fields + sums, beta_max / 4.0, num_steps, num_reps, seed, tabu_lambda,
                            tabu_tenure)
         return values(np.where(spins > 0, np.arange(V), -1))
 
@@ -549,7 +548,7 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
     rng = np.random.default_rng(seed)
     tenure = int(tabu_tenure * V)
     fields = np.ascontiguousarray(fields, dtype=np.float64)
-    fold = lambda a, b: _lib.pfa_categorical_fold(*form.lines, fields, a, b)
+    fold = lambda a, b: _lib.pfa_fold_categorical(*form.lines, fields, a, b)
     cur_best = None
     stale = 0   # 1 after the first repetition, plus the restarts so far that did not lower the best energy
     for rep in range(num_reps):
@@ -575,15 +574,15 @@ def _anneal_categorical(form, fields, beta_max, num_flips, num_reps, seed, tabu_
         first_c, late_c = ctypes.c_double(energy), ctypes.c_double()
         lowest = ctypes.byref(first_c), cur_first, ctypes.byref(late_c), cur_late
         if sparse:
-            _lib.pfa_sparse_categorical_anneal(
-                *stored, F, m, V, cur, num_flips, beta_start, beta_max, ctypes.byref(energy_c), *lowest,
+            _lib.pfa_anneal_sparse_categorical(
+                *stored, F, m, V, cur, num_steps, beta_start, beta_max, ctypes.byref(energy_c), *lowest,
                 int(rng.integers(1, 2**63)), tabu_lambda, tenure,
             )
         else:
             noise_vec = -np.log(-np.log(rng.random(m)))
             noise_buffer = np.concatenate((noise_vec, noise_vec)).astype(np.float32)
-            _lib.pfa_categorical_anneal(
-                couplings, F, m, V, grp, cur, noise_buffer, num_flips, beta_start, beta_max, ctypes.byref(energy_c),
+            _lib.pfa_anneal_categorical(
+                couplings, F, m, V, grp, cur, noise_buffer, num_steps, beta_start, beta_max, ctypes.byref(energy_c),
                 *lowest, int(rng.integers(1, 2**63)), tabu_lambda, tenure,
             )
         states = [(first_c.value, cur_first), (late_c.value, cur_late)]
@@ -605,7 +604,7 @@ def _one_hot_layout(groups):
     return gid, order, sizes, starts
 
 
-def categorical_from_one_hot(couplings, fields, groups):
+def from_one_hot(couplings, fields, groups):
     """
     Converts a categorical problem from one-hot form to the form run() takes with sizes.
 
@@ -629,12 +628,12 @@ def categorical_from_one_hot(couplings, fields, groups):
     m = len(rest)
     out_couplings = np.empty((m, m))
     out_fields = np.empty(m)
-    offset = _lib.pfa_categorical_prepare(couplings, fields, n, len(sizes), ref, m, rest.astype(np.int32),
+    offset = _lib.pfa_from_one_hot(couplings, fields, n, len(sizes), ref, m, rest.astype(np.int32),
                                           gid[rest].astype(np.int32), out_couplings, out_fields)
     return out_couplings, out_fields, sizes, offset
 
 
-def categorical_to_one_hot(x, groups):
+def to_one_hot(x, groups):
     """The one-hot x (0/1) of a state given as one value per variable, as run() returns it with sizes."""
     _, order, _, starts = _one_hot_layout(groups)
     one_hot = np.zeros(len(order), dtype=np.int8)

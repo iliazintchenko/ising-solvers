@@ -1,4 +1,4 @@
-// PFA categorical (Potts) kernel (included by pfa_native.c). Variable r takes one of q_r >= 2 values; value 0 is its
+// PFA categorical (Potts) kernel (included by pfa.c). Variable r takes one of q_r >= 2 values; value 0 is its
 // reference, and each other value owns a slot k, with grp[k] = r (slots grouped by variable). F[k] is the energy of
 // slot k's value minus that of value 0, given the other variables' current values, and Jt (m x m, symmetric, zero
 // within a variable) holds the couplings between slots. cur[r] is the slot of r's value, or -1 at value 0.
@@ -16,7 +16,7 @@
 // blk[k / 8] tells the pass where 8 slots share one o: the variable they all belong to, or V (o[V] = 0) when all
 // belong to two-value variables; -1 otherwise, and the pass then reads o[grp[k]] slot by slot.
 //
-// The pass over one chunk of slots is cat_chunk(), one version per SIMD path in pfa_native_categorical_<path>.c;
+// The pass over one chunk of slots is cat_chunk(), one version per SIMD path in categorical_<path>.c;
 // cat_pass() below runs it over all chunks. Noise, schedule, tabu and tie-breaking are as in the spin kernel.
 
 // Categorical pass pieces, one slot at a time. Update: F[k] minus ra[k] if there is a row ra, plus rb[k] if there is
@@ -114,8 +114,8 @@ ANNEAL_ATTR static void cat_loop(const double *Jt, double *F, int m, int V, cons
 // Jt: m x m couplings between slots; F: m fields (updated in place); grp: variable of each slot, 0..V-1, grouped;
 // cur: V current slots (updated in place); noise: m noise values stored twice; best_cur: V slots (in: the initial
 // state, out: the lowest of the first half of the moves); late_cur: V slots (out: the lowest of the second half).
-// As pfa_native_anneal otherwise.
-void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int *grp, int *cur, const float *noise,
+// As pfa_anneal_spin otherwise.
+void pfa_anneal_categorical(const double *Jt, double *F, int m, int V, const int *grp, int *cur, const float *noise,
                             long nmoves, double beta_start, double beta_max, double *E_io, double *best_io,
                             int *best_cur, double *late_io, int *late_cur, uint64_t seed, double lambda, int tenure) {
     double *pen = calloc(V, sizeof(double)), *zero = calloc(m, sizeof(double));
@@ -147,8 +147,8 @@ void pfa_categorical_anneal(const double *Jt, double *F, int m, int V, const int
 // One-hot input -> reference-value layout, in one pass. C: n x n couplings over all slots, f: n fields; ref[r]: the
 // reference slot of variable r; slots[i], sgrp[i]: the i-th other slot and its variable (m of them, grouped by
 // variable). Writes Jt (m x m, zero within a variable), ut (m) and returns the energy of the all-reference state.
-double pfa_categorical_prepare(const double *C, const double *f, int n, int V, const int *ref, int m, const int *slots,
-                               const int *sgrp, double *Jt, double *ut) {
+double pfa_from_one_hot(const double *C, const double *f, int n, int V, const int *ref, int m, const int *slots,
+                        const int *sgrp, double *Jt, double *ut) {
     double e0 = 0.0;
     for (int r = 0; r < V; r++) {
         const double *row = C + (long)ref[r] * n; double s = 0.0;

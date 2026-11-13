@@ -1,20 +1,20 @@
 // PFA engine, native single-core version, compiled as one unit: this file picks the SIMD path at compile time from
 // the target flags (see the Makefile) and includes the kernels,
-//   pfa_native_spin.c                 spins: pfa_native_anneal()
-//   pfa_native_categorical.c          categorical variables: pfa_categorical_anneal()
-//   pfa_native_sparse_spin.c          spins, sparse couplings: pfa_sparse_anneal()
-//   pfa_native_sparse_categorical.c   categorical variables, sparse couplings: pfa_sparse_categorical_anneal()
-//   pfa_native_eliminate.c            categorical variables: pfa_categorical_eliminate(), before the anneal
-//   pfa_native_fold.c                 pfa_spin_fold(), pfa_sparse_spin_fold(), pfa_categorical_fold(): one state
-//                                     takes from another every part that it has lower, between the repetitions
+//   spin.c                 spins: pfa_anneal_spin()
+//   categorical.c          categorical variables: pfa_anneal_categorical()
+//   sparse_spin.c          spins, sparse couplings: pfa_anneal_sparse_spin()
+//   sparse_categorical.c   categorical variables, sparse couplings: pfa_anneal_sparse_categorical()
+//   eliminate.c            categorical variables: pfa_eliminate(), before the anneal
+//   fold.c                 pfa_fold_spin(), pfa_fold_sparse_spin(), pfa_fold_categorical(): one state takes from
+//                          another every part that it has lower, between the repetitions
 // Each kernel holds its anneal loop. The first two include their pass over memory for the chosen path,
-// pfa_native_spin_<path>.c or pfa_native_categorical_<path>.c:
+// spin_<path>.c or categorical_<path>.c:
 //   sve      vector-length agnostic, predicated   ARM with SVE (Graviton3 and 4, NVIDIA Grace, A64FX, ...)
 //   neon     2 doubles / 4 floats per vector      every other 64-bit ARM (Apple Silicon, Graviton2, ...)
 //   avx512   8 doubles per vector                 x86-64 with AVX-512
 //   avx2     4 doubles per vector                 x86-64 with AVX2 (and FMA)
 //   scalar                                        anything else
-// The sparse two draw from the tree of sums of pfa_native_sums.c, the same code on every path.
+// The sparse two draw from the tree of sums of sums.c, the same code on every path.
 // Build with -ffp-contract=off: each kernel rescores the winning chunk and must reproduce the pass's scores exactly,
 // so the compiler may not fuse multiply-adds in one place and not the other.
 //
@@ -38,14 +38,14 @@
 #define SIMD_PATH "sve-streaming"
 #define SVE_STREAMING __arm_streaming
 #define ANNEAL_ATTR __arm_locally_streaming
-#define SPIN_PASS "pfa_native_spin_sve.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_sve.c"
+#define SPIN_PASS "spin_sve.c"
+#define CATEGORICAL_PASS "categorical_sve.c"
 #elif defined(__ARM_FEATURE_SVE)
 #include <arm_sve.h>
 #define SIMD_PATH "sve"
 #define SVE_STREAMING
-#define SPIN_PASS "pfa_native_spin_sve.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_sve.c"
+#define SPIN_PASS "spin_sve.c"
+#define CATEGORICAL_PASS "categorical_sve.c"
 #elif defined(TEST_AVX512_SIMDE)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx512.h>
@@ -53,42 +53,42 @@
 #define CVT512(D) _mm256_insertf128_ps(_mm256_castps128_ps256(_mm256_cvtpd_ps(_mm512_castpd512_pd256(D))), \
                                        _mm256_cvtpd_ps(_mm512_extractf64x4_pd(D, 1)), 1)   // SIMDe lacks _mm512_cvtpd_ps
 #define X86_PASSES
-#define SPIN_PASS "pfa_native_spin_avx512.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_avx512.c"
+#define SPIN_PASS "spin_avx512.c"
+#define CATEGORICAL_PASS "categorical_avx512.c"
 #elif defined(TEST_AVX2_SIMDE)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx2.h>
 #include <simde/x86/fma.h>
 #define SIMD_PATH "avx2-simde"
 #define X86_PASSES
-#define SPIN_PASS "pfa_native_spin_avx2.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_avx2.c"
+#define SPIN_PASS "spin_avx2.c"
+#define CATEGORICAL_PASS "categorical_avx2.c"
 #elif defined(TEST_SCALAR)
 #define SIMD_PATH "scalar-test"
-#define SPIN_PASS "pfa_native_spin_scalar.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_scalar.c"
+#define SPIN_PASS "spin_scalar.c"
+#define CATEGORICAL_PASS "categorical_scalar.c"
 #elif defined(__aarch64__) && defined(__ARM_NEON)
 #include <arm_neon.h>
 #define SIMD_PATH "neon"
-#define SPIN_PASS "pfa_native_spin_neon.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_neon.c"
+#define SPIN_PASS "spin_neon.c"
+#define CATEGORICAL_PASS "categorical_neon.c"
 #elif defined(__AVX512F__)
 #include <immintrin.h>
 #define SIMD_PATH "avx512"
 #define CVT512(D) _mm512_cvtpd_ps(D)
 #define X86_PASSES
-#define SPIN_PASS "pfa_native_spin_avx512.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_avx512.c"
+#define SPIN_PASS "spin_avx512.c"
+#define CATEGORICAL_PASS "categorical_avx512.c"
 #elif defined(__AVX2__)
 #include <immintrin.h>
 #define SIMD_PATH "avx2"
 #define X86_PASSES
-#define SPIN_PASS "pfa_native_spin_avx2.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_avx2.c"
+#define SPIN_PASS "spin_avx2.c"
+#define CATEGORICAL_PASS "categorical_avx2.c"
 #else
 #define SIMD_PATH "scalar"
-#define SPIN_PASS "pfa_native_spin_scalar.c"
-#define CATEGORICAL_PASS "pfa_native_categorical_scalar.c"
+#define SPIN_PASS "spin_scalar.c"
+#define CATEGORICAL_PASS "categorical_scalar.c"
 #endif
 
 #ifndef ANNEAL_ATTR
@@ -113,12 +113,12 @@ static inline float hmax8(__m256 x) {
 }
 #endif
 
-const char *pfa_native_simd_path(void) { return SIMD_PATH; }
+const char *pfa_simd_path(void) { return SIMD_PATH; }
 
-#include "pfa_native_spin.c"
-#include "pfa_native_categorical.c"
-#include "pfa_native_sums.c"
-#include "pfa_native_sparse_spin.c"
-#include "pfa_native_sparse_categorical.c"
-#include "pfa_native_eliminate.c"
-#include "pfa_native_fold.c"
+#include "spin.c"
+#include "categorical.c"
+#include "sums.c"
+#include "sparse_spin.c"
+#include "sparse_categorical.c"
+#include "eliminate.c"
+#include "fold.c"
