@@ -316,12 +316,13 @@ entries, 24 bytes per nonzero coupling, plus for categorical variables its table
 One function, `pfa_native_eliminate.c`, reads both layouts of the couplings, the array and the tables of the sparse
 kernel: in either, the couplings of a value to the values of one neighbour are one stretch of memory.
 
-- **A failing pair is dropped early.** Most pairs (a, b) fail the test, so its sum is ordered to show that soon. It
-  starts at E(a) − E(b), the energies of the two values with every neighbour at its lowest allowed value: one sum per
-  value, not per pair, and never below the full sum. Each neighbour then lowers it, from its term in that state to
-  its minimum. Once below 0 it stays there, and the pair is dropped.
-- **The neighbour that decides is read first.** The neighbour that took a pair below 0 moves to the front of its
-  variable's order, where the next pairs meet it.
+- **A failing test stops early.** The test is made for every two values a and b of one variable, and most of them
+  fail. Its sum starts from an upper bound, E(a) − E(b): the energies of a and of b with every neighbour of their
+  variable held at its lowest allowed value. That is one sum per value, used in every test the value enters. Each
+  neighbour in turn then replaces its term by its minimum, which can only lower the total. Once the total is below 0
+  the test has failed, and the remaining neighbours are skipped.
+- **The neighbour that decides is read first.** The neighbour that took a test below 0 moves to the front of its
+  variable's order, where the next tests meet it.
 - **Only what changed is tested again**: the variables with a neighbour that lost a value.
 - **No tolerance.** The comparison is the floating-point one, so two values that tie only up to rounding can both stay.
 - **The reduced problem.** The lowest value left of each variable becomes its value 0. With k_s that value of s,
@@ -342,8 +343,9 @@ row, and one for categorical variables, which reads both layouts as the eliminat
 - **Groups.** The differing variables are disjoint sets, joined for every pair of them that interacts; each set then
   has one sum, Δ(G). The work is the couplings of the differing variables: their stored neighbours on the sparse
   kernels, their rows of the array otherwise.
-- **No tolerance.** A pair interacts when the expression above is not exactly 0. Where it is nonzero only by rounding,
-  two groups are joined that could have been chosen separately: a choice is lost, exactness is not.
+- **No tolerance.** Two differing variables interact when their expression under Recombination above is not exactly
+  0. Where it is nonzero only by rounding, two groups are joined that could have been chosen separately: a choice is
+  lost, exactness is not.
 - **Two states per run.** Each kernel keeps the lowest state of the first and of the second half of its flips, with
   the bookkeeping it already had: at the midpoint the current state becomes the lowest so far of the second half.
 - **Rounds.** The best state takes groups from the run's two states and from the state the run started from, going
