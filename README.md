@@ -1,8 +1,7 @@
 # Pretty Fast Annealer
 
 PFA minimizes an energy of single-variable and pairwise terms over discrete variables, each taking one of several
-values. A variable with two values is a spin, s ∈ {−1, +1}. The formulas below are for spins; Categorical variables
-gives them for any number of values. For n spins,
+values. A variable with two values is a spin, s ∈ {−1, +1}. For n spins,
 
 ```
 E(s) = ½ sᵀ J s + hᵀ s
