@@ -19,7 +19,7 @@ variable with two values is a spin, and its one move a flip. Spins are given as 
 fields h,
 
 ```
-E(s) = ½ sᵀ J s + hᵀ s,        ΔE_j = −2 s_j (h_j + Σ_k J_jk s_k)
+E(s) = ½ sᵀ J s + hᵀ s,        ΔE_j = −2 s_j (h_j + Σ_l J_jl s_l)
 ```
 
 the case T_rs(s_r, s_s) = J_rs s_r s_s and f_r(s_r) = h_r s_r. A problem over 0/1 variables x is the same problem in
@@ -29,7 +29,7 @@ rejects: every step makes one move, chosen among all moves of all variables by i
 ```python
 import pfa
 
-spins = pfa.run(couplings, fields, beta_max=1.0, num_steps=100 * n, num_reps=10)
+spins = pfa.run(couplings, fields, beta_max=1.0, num_steps=100 * len(couplings), num_reps=10)
 values = pfa.run(couplings, fields, sizes=sizes, num_steps=100 * len(sizes), num_reps=10)
 ```
 
@@ -53,14 +53,14 @@ Each step makes one move, chosen among all moves of all variables with probabili
 p(r→k) = e^(−β ΔE(r→k)) / Σ over all moves e^(−β ΔE)
 ```
 
-while the inverse temperature β rises linearly from 0 to `beta_max`. Every state has one value per variable. A
-variable that must take exactly one of several values is therefore not a one-hot group of spins, which every single
-flip breaks: there is no penalty to hold it and no penalty barrier between its values, and a move changes the whole
-variable in one step.
+while the inverse temperature β rises linearly from 0 to `beta_max`. Every state has one value per variable. So a
+variable that must take exactly one of several values is not written as a one-hot group of spins, where every single
+flip breaks the constraint and a penalty must hold it: there is no penalty to set and no barrier between the values,
+and a move changes the whole variable in one step.
 
 **Equilibrium.** Read as a continuous-time process, each move fires at rate e^(−β ΔE) and its reverse at
 e^(+β ΔE). The ratio e^(−2β ΔE) is detailed balance for e^(−2β E): run at β, PFA samples the Boltzmann distribution of
-inverse temperature 2β. Skipping the waiting times also weights each state by its exit rate W(s) = Σ over moves
+inverse temperature 2β. Skipping the waiting times also weights each state by its exit rate, Σ over its moves of
 e^(−β ΔE), favoring states with many cheap exits. An optimizer doesn't care: it keeps the best state it has seen.
 
 **Tabu.** When variable r moves at inverse temperature β_r, the ΔE of every move of r is raised by λ/β_r for the next
@@ -145,8 +145,8 @@ so many variables that the clusters merge, there is one cluster and the lower st
 recombination. If the couplings are sparse and fields or a few strong couplings hold most variables in place, low
 states differ in many small clusters, and the best state improves cluster by cluster. On problems of that kind
 (side-chain packing, MAX-2-SAT, sparse glasses with fields or with couplings on several scales), with R = 10 and
-R = 30 the final energy was lower than without recombination, where each restart starts one step colder than the
-last, in 82 of 84 trials (seven problems, six seeds, both values of R). On dense problems and a random sparse glass
+R = 30 the final energy was lower in 82 of 84 trials (seven problems, six seeds, both values of R) than with the
+earlier scheme, no recombination and every restart one step colder than the last whatever it brought. On dense problems and a random sparse glass
 with couplings of equal magnitude and no fields, the results stayed within the spread between seeds.
 
 ## Compared with simulated annealing
@@ -194,7 +194,7 @@ SA accepts the breaking flip with probability e^(−β (P + ΔO_i)), so it moves
 β ≲ 1/P. It needs β ≳ 1/ε to tell good objective values from bad. With P/ε ≫ 1, no β does both: at β = 1/ε each
 breaking flip takes about e^(P/ε) proposals, and the constraints freeze long before the objective is optimized.
 
-PFA is blind to a common shift of all ΔE, which cancels in the normalization of p_j. From a feasible state, the flips
+PFA is blind to a common shift of all ΔE, which cancels in the normalization of p. From a feasible state, the flips
 that break one constraint all carry the same P, so
 
 ```
@@ -206,7 +206,7 @@ The objective alone chooses which constraint to break, whatever P is, and PFA le
 has this advantage.
 
 **Long anneals.** Late in the anneal, what counts is how far the state still moves without climbing. Held at the same
-low temperature (PFA at β, SA at 2β), PFA sits lower in energy than SA and still drifts further from where it started.
+low temperature (PFA at β, SA at 2β, see Equilibrium), PFA sits lower in energy than SA and still drifts further from where it started.
 
 ## Implementation
 
@@ -228,7 +228,7 @@ given size. The tricks of the array kernels:
   ```
 
   so picking a move costs one multiply, one add and one comparison per row.
-- **Noise drawn once per repetition.** At step t, row k reads g_((k + o_t) mod n), with a fresh random offset o_t.
+- **Noise drawn once per repetition.** At step t, row k reads g_((k + ω_t) mod n), with a fresh random offset ω_t.
   Each step on its own is exact Gumbel-max sampling; across steps the same values return shifted, a cheap stand-in
   for fresh noise. A random offset, unlike a shift by one, keeps large values from marching through neighbouring
   indices, so results don't depend on the order of the variables. The vector is stored as g followed by g, so the n
@@ -245,7 +245,7 @@ given size. The tricks of the array kernels:
   a_r itself stands for the move back to value 0: S_k = 0. The pass updates every F(k) with the row of the value left
   and of the value entered, and reads o_r only for variables with more than two values, as it reaches them. Rounding
   can change a pick only when two scores agree to 7 digits (2⁻²⁴ ≈ 6·10⁻⁸).
-- **Spins.** A spin has one row and one move, and the spin kernel stores φ_j = (h_j + Σ_k J_jk s_k) / 2 in float64,
+- **Spins.** A spin has one row and one move, and the spin kernel stores φ_j = (h_j + Σ_l J_jl s_l) / 2 in float64,
   so ΔE_j = −4 s_j φ_j. Dividing −β ΔE_j + g_j by 4β leaves the argmax unchanged and gives the score
 
   ```
@@ -255,16 +255,17 @@ given size. The tricks of the array kernels:
   with spins stored as float32 ±1: no branch and no o_r. Flipping spin i changes every φ_j by −s_i J_ij, with s_i its
   value before the flip. With s_i = ±1 fixed for the pass, that is a plain subtract or add of row i, read in place: no
   multiply, and s_i is not read again. φ_i itself does not change. After N flips, rounding has added at most about
-  N · 2⁻⁵³ of the largest field: negligible. A variable with two values among variables with more is scored the
-  same way: S_k = −1 at value 0 and +1 at value 1, with o_r = 0.
+  N · 2⁻⁵³ of the largest field: negligible. A variable with two values among variables with more is scored as a
+  spin, not by the rule above: S_k = +1 when k is its value and −1 when it is at value 0, with o_r = 0.
 - **Argmax without indices.** A vector argmax carries an index next to every running maximum, which roughly doubles
   the selection work. The pass instead keeps only maxima and records which chunk of 64 rows (8 vectors on SVE)
   reached the largest one. Afterwards it rescores that chunk, still in cache, and returns its first row at the
   maximum: about 64/n of a pass extra. The rescore repeats the pass's float operations exactly (the build stops the
   compiler from fusing multiply-adds on its own), so it finds the same maximum, and ties go to the smallest index.
 - **Tabu for free.** For a spin, the penalty, c_i = λ / (4β_i) in score units, is added into the stored field,
-  φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and taken out when the tenure of i ends or i flips again; for
-  a variable with more values it is in o_r. The pass reads nothing extra; the anneal loop adds and removes penalties
+  φ̃_i = φ_i − s_i c_i, so that s_i φ̃_i = s_i φ_i − c_i, and taken out when the tenure of i ends or i flips again. A
+  variable with two values among variables with more has it added into F the same way; a variable with more values
+  has it in o_r. The pass reads nothing extra; the anneal loop adds and removes penalties
   at O(1) per step.
 - **Energy tracked, not computed.** E += ΔE at each move, O(1). The lowest state of each half of a repetition is
   copied only when the anneal steps up from a new low, so a descent through many new lows costs one copy.
@@ -281,7 +282,7 @@ gives a different result on the sparse kernels than on the array kernels.
 - **Selection without a pass.** Gumbel-max with stored noise needs the pass: the offset moves, so every score changes
   at every step. The sparse kernels draw from p directly instead, which costs one exponential per ΔE that changed:
   for a spin d + 1, n if every spin were coupled to every other; for a variable with more values, every row of its
-  neighbours, since each ΔE of a neighbour s, F(k) − F(a_s), changes with F(a_s). The weights w_k = e^(−β ΔE_k) of
+  neighbours, since each ΔE of a neighbour s, F(k) − F(a_s) over the values k of s, changes with F(a_s). The weights w_k = e^(−β ΔE_k) of
   all moves are the leaves of a tree of sums with fan-out 8, every entry the sum of the 8 below it. A uniform number
   times the total, followed down the tree, lands on move k with probability
 
@@ -301,8 +302,8 @@ gives a different result on the sparse kernels than on the array kernels.
   and otherwise drawn again. Weight times acceptance is proportional to e^(−β ΔE_k), so the move made has exactly the
   distribution of this step's β. A draw that is not accepted costs a walk down the tree, not a step.
 - **Recomputing the weights.** Rejected draws become more frequent as β leaves β₀. If they cost ρ · t at the t-th
-  step after all weights were computed, and computing them costs C, a cycle of K steps costs C/K + ρ K/2 per step:
-  least when ρ K²/2 = C. So all weights are recomputed, at the current β, when the rejected draws since the last time
+  step after all weights were computed, and computing them costs Q, a cycle of K steps costs Q/K + ρ K/2 per step:
+  least when ρ K²/2 = Q. So all weights are recomputed, at the current β, when the rejected draws since the last time
   have cost as much as that takes. Weights are kept relative to the largest, and are also recomputed if their total
   leaves the range of a float64.
 - **Lowest states.** They are brought up to date from a list of the variables moved since they were last written,
@@ -313,7 +314,8 @@ rows. `run()` takes the sparse kernel where that is the cheaper step:
 
 ```
 spins:        d < n / 30 − 7        d: mean number of neighbours of a spin
-more values:  v < n / 9 − 20        v: values other than 0 of a variable's neighbours, averaged over the n rows
+more values:  v < n / 9 − 20        v: rows a move changes, the values other than 0 of the moved variable's
+                                    neighbours, averaged over the n rows
 ```
 
 The constants are fitted to timings of both kernels on one machine (Apple M4). For spins that is fewer than about 3%
@@ -406,7 +408,7 @@ A problem in one-hot form, ½ xᵀ C x + fᵀ x over binary x with one 1 per gro
 `pfa.from_one_hot(couplings, fields, groups)`, with `groups[i]` the variable that x_i belongs to. It returns the
 couplings, fields, sizes and the energy offset between the two forms; `pfa.to_one_hot(values, groups)` converts a
 result back. A problem over 0/1 variables converts to spins with `pfa.from_binary(couplings, fields, offset)`, and
-`pfa.energy(state, couplings, fields, offset)` is ½ sᵀ J s + hᵀ s + offset for a state of either kind.
+`pfa.energy(state, couplings, fields, offset)` is ½ sᵀ J s + hᵀ s + offset for a ±1 or a 0/1 state.
 
 `examples/spins.py` solves a small problem given over 0/1 variables, `examples/colouring.py` colours a graph with
 several values per variable, and `examples/throughput.py` measures steps per second.
