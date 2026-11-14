@@ -33,6 +33,18 @@ spins = pfa.run(couplings, fields, beta_max=1.0, num_steps=100 * len(couplings),
 values = pfa.run(couplings, fields, sizes=sizes, num_steps=100 * len(sizes), num_reps=10)
 ```
 
+## Results vs. Simulated Annealing
+
+The reference is optimized simulated annealing (SA, see Compared with simulated annealing) on spin problems, each
+method with its final inverse temperature tuned for every length of anneal. A PFA flip costs **1.2–1.4×** an accepted
+SA flip; a rejected SA proposal costs about 1/n of an accepted flip. With flips and rejected proposals both counted,
+PFA reaches the same energy in less work by:
+
+| problems | speedup |
+|---|---|
+| spin glasses | **1.5–2×** |
+| constrained problems with large penalties | **15–1000×**, or SA never reaches that energy |
+
 ## Algorithm
 
 Each step makes one move, chosen among all moves of all variables with probability
@@ -139,22 +151,15 @@ with couplings of equal magnitude and no fields, the results stayed within the s
 
 ## Compared with simulated annealing
 
-The reference is simulated annealing (SA) following Isakov et al.,
-[Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084): stored local fields,
-sequential sweeps and precomputed random numbers read at a random offset, built like PFA's array kernels with full
-float64 coupling rows, one replica on one core, and run on dense spin problems. The paper's multi-spin coding and
-bipartite updates need many replicas or a bipartite graph and are left out.
+SA here follows Isakov et al.,
+[Optimised simulated annealing for Ising spin glasses](https://arxiv.org/abs/1401.1084), built like PFA's
+implementation: full float64 coupling rows, one replica, one core. The paper's tricks for low-precision couplings,
+many replicas or sparse graphs (lookup tables, multi-spin coding, bipartite updates) are left out on both sides, and
+so is PFA's own storage for sparse couplings.
 
 SA proposes one spin at a time and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it
 rejects almost every proposal; PFA never rejects. The comparison is of this step: repetitions, elimination and
-recombination sit outside it and would apply to either method. With each method's final inverse temperature tuned for
-every length of anneal, a PFA flip costs **1.2–1.4×** an accepted SA flip and a rejected SA proposal about 1/n of
-one. With both counted, PFA reaches the same energy in less work by:
-
-| problems | speedup |
-|---|---|
-| spin glasses | **1.5–2×** |
-| constrained problems with large penalties | **15–1000×**, or SA never reaches that energy |
+recombination sit outside it and would apply to either method.
 
 **Cost per step.** A flip in either method updates all n local fields. Per spin, an accepted SA flip moves 24 bytes:
 a float64 coupling read, a float64 field read and written. A PFA flip also reads the spin and a stored random number
