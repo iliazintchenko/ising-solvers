@@ -158,12 +158,8 @@ many replicas or sparse graphs (lookup tables, multi-spin coding, bipartite upda
 so is PFA's own storage for sparse couplings.
 
 SA proposes one spin at a time and accepts the flip with probability min(1, e^(−β ΔE_j)). As the anneal cools, it
-rejects almost every proposal; PFA never rejects. SA's two ingredients have PFA counterparts:
-
-| SA | PFA | what it does |
-|---|---|---|
-| Metropolis acceptance of one proposed spin | Boltzmann selection over all n spins | decides which flip happens |
-| sequential sweeps | tabu | spreads the work over distinct spins |
+rejects almost every proposal; PFA never rejects. The comparison is of this step: repetitions, elimination and
+recombination sit outside it and would apply to either method.
 
 **Cost per step.** A flip in either method updates all n local fields. Per spin, an accepted SA flip moves 24 bytes:
 a float64 coupling read, a float64 field read and written. A PFA flip also reads the spin and a stored random number
