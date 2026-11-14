@@ -1,6 +1,6 @@
 # Pretty Fast Annealer
 
-<p align="center"><img src="logo.png" width="360" alt="PFA"></p>
+<p align="center"><img src="logo.png" width="640" alt="PFA"></p>
 
 PFA minimizes an energy of single-variable and pairwise terms over discrete variables. Variable r takes one of several
 values, a_r, and
